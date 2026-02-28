@@ -18,7 +18,7 @@ public class ControlCommandManager : MonoBehaviour
 {
     public Piece piece;
     private Queue<ControlCommand> commandQueue = new Queue<ControlCommand>();
-    [SerializeField] private float hardDropQueueDelay = 0.25f;
+    public float hardDropQueueDelay = 0.25f;
 
     private bool hardDropDelayArmed;
     private float hardDropReadyTime;

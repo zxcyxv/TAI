@@ -9,7 +9,7 @@ public class ColdClearAgent : MonoBehaviour
     [SerializeField] private ControlCommandManager commandManager;
 
     [Header("Runtime")]
-    [SerializeField] private bool enableBot = true;
+    public bool enableBot { get; private set; } = false;
     [SerializeField] private uint incomingGarbage;
     [SerializeField] private bool verboseLogging;
 
@@ -18,6 +18,42 @@ public class ColdClearAgent : MonoBehaviour
     private Board subscribedBoard;
     private bool waitingForMove;
     private bool hasLoggedMissingRefs;
+
+    // singleton
+    public static ColdClearAgent Instance;
+
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        } else
+        {
+            Destroy(gameObject);
+        }
+    }
+
+
+    public void SetActive(bool activate)
+    {
+        if (enableBot == activate)
+        {
+            return;
+        }
+
+        enableBot = activate;
+        if (activate)
+        {
+            board.RestartGame();
+            TryLaunchFromBoardState();
+        }
+        else
+        {
+            board.RestartGame();
+            ShutdownBot();
+        }
+    }
 
     private void OnEnable()
     {
@@ -168,7 +204,7 @@ public class ColdClearAgent : MonoBehaviour
         RelaunchBot();
     }
 
-    private void RelaunchBot()
+    public void RelaunchBot()
     {
         ShutdownBot();
         TryLaunchFromBoardState();

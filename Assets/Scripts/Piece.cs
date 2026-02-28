@@ -63,20 +63,19 @@ public class Piece : MonoBehaviour
 
         lockTime += Time.deltaTime;
 
-        if (HandleHold())
-        {
-            board.Set(this);
-            return;
+        if (ColdClearAgent.Instance.enableBot) RunCommand();
+        else {
+            if (HandleHold())
+            {
+                board.Set(this);
+                return;
+            }
+
+            HandleRotation();
+            HandleMoveInputs();
+            HandleGravity();
+            HandleHardDrop();
         }
-
-        HandleRotation();
-        HandleMoveInputs();
-        HandleGravity();
-        HandleHardDrop();
-
-        if (Input.GetKeyDown(KeyCode.R)) board.GameOver();
-
-        RunCommand();
 
         board.Set(this);
     }
