@@ -194,6 +194,7 @@ public class Board : MonoBehaviour
     {
         ResetRuntimeState();
         FillQueueIfNeeded();
+        DataHandler.Instance?.UpdateBoard();
         SpawnPiece();
         GameRestarted?.Invoke();
     }
@@ -288,6 +289,7 @@ public class Board : MonoBehaviour
         }
 
         Clear(activePiece);
+        DataHandler.Instance?.UpdateBoard();
 
         if (!hasHoldPiece)
         {
@@ -308,6 +310,7 @@ public class Board : MonoBehaviour
     public void NotifyPieceLocked()
     {
         canHold = true;
+        DataHandler.Instance?.UpdateBoard();
     }
 
     private void SpawnPiece(TetrominoData data)
@@ -321,6 +324,7 @@ public class Board : MonoBehaviour
         activePiece.Initialize(this, runtimeSpawnPosition, data);
         if (IsVaildPosition(activePiece, runtimeSpawnPosition))
         {
+            DataHandler.Instance?.SaveData();
             Set(activePiece);
             PieceSpawned?.Invoke(data);
         }

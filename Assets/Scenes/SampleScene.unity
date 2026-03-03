@@ -434,6 +434,50 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 148157110}
   m_CullTransparentMesh: 1
+--- !u!1 &161127409
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 161127411}
+  - component: {fileID: 161127410}
+  m_Layer: 0
+  m_Name: Data Handler
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &161127410
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 161127409}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9a430d4a234a941a9865dc091769301f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!4 &161127411
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 161127409}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 312.97833, y: 274.08173, z: -1.8432952}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &183857929
 GameObject:
   m_ObjectHideFlags: 0
@@ -1389,7 +1433,7 @@ GameObject:
   m_Component:
   - component: {fileID: 478535746}
   m_Layer: 5
-  m_Name: Setting Attributes Right
+  m_Name: Setting Attributes Left
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2065,7 +2109,7 @@ GameObject:
   m_Component:
   - component: {fileID: 583002800}
   m_Layer: 5
-  m_Name: Setting Attributes Left
+  m_Name: Setting Attributes Right
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2904,6 +2948,7 @@ MonoBehaviour:
   dontDestroyOnLoad: 1
   ccm: {fileID: 32116811}
   board: {fileID: 975815124}
+  dataHandler: {fileID: 161127410}
   commands: 
 --- !u!4 &820840148
 Transform:
@@ -3119,19 +3164,19 @@ MonoBehaviour:
   tilemap: {fileID: 2030717800}
   activePiece: {fileID: 0}
   tetrominos:
-  - tetromino: 0
-    tile: {fileID: 11400000, guid: 75115b400fb3942c7958446b2b8c4fd8, type: 2}
   - tetromino: 1
-    tile: {fileID: 11400000, guid: 6eb1a80d4f29a44ab8d13c8ea8d3d69d, type: 2}
+    tile: {fileID: 11400000, guid: 75115b400fb3942c7958446b2b8c4fd8, type: 2}
   - tetromino: 2
-    tile: {fileID: 11400000, guid: b15f7dae9b05542ce800b6060a124c81, type: 2}
+    tile: {fileID: 11400000, guid: 6eb1a80d4f29a44ab8d13c8ea8d3d69d, type: 2}
   - tetromino: 3
-    tile: {fileID: 11400000, guid: dbea5d0c3fc5040d682b62116340189b, type: 2}
+    tile: {fileID: 11400000, guid: b15f7dae9b05542ce800b6060a124c81, type: 2}
   - tetromino: 4
-    tile: {fileID: 11400000, guid: ff78cfd190b88480fbc5e3c6e903fa80, type: 2}
+    tile: {fileID: 11400000, guid: dbea5d0c3fc5040d682b62116340189b, type: 2}
   - tetromino: 5
-    tile: {fileID: 11400000, guid: 48895fdd8663d4c319e94716b1eb8a0f, type: 2}
+    tile: {fileID: 11400000, guid: ff78cfd190b88480fbc5e3c6e903fa80, type: 2}
   - tetromino: 6
+    tile: {fileID: 11400000, guid: 48895fdd8663d4c319e94716b1eb8a0f, type: 2}
+  - tetromino: 7
     tile: {fileID: 11400000, guid: 11bbe31ead61847af976cc012b533078, type: 2}
   spawnPosition: {x: -1, y: 7, z: 0}
   boradSize: {x: 10, y: 20}
@@ -6928,4 +6973,5 @@ SceneRoots:
   - {fileID: 189919571}
   - {fileID: 32116812}
   - {fileID: 820840148}
+  - {fileID: 161127411}
   - {fileID: 241608805}

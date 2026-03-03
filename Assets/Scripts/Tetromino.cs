@@ -3,6 +3,7 @@ using UnityEngine.Tilemaps;
 
 public enum Tetromino
 {
+     None,
      I,
      O,
      T,
@@ -23,6 +24,8 @@ public struct TetrominoData
 
     public void Initialize()
     {
+        if (tetromino == Tetromino.None) return;
+        
         cells = Data.Cells[tetromino];
         wallKicks = Data.WallKicks[tetromino];
         wallKicks180 = Data.WallKicks180[tetromino];

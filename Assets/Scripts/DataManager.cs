@@ -25,6 +25,7 @@ public class DataManager : MonoBehaviour
     [SerializeField] private bool dontDestroyOnLoad = true;
     [SerializeField] private ControlCommandManager ccm;
     [SerializeField] private Board board;
+    [SerializeField] private DataHandler dataHandler;
     [SerializeField] private List<ControlCommand> commands = new List<ControlCommand>();
 
     private int[,] boardData;
@@ -128,6 +129,32 @@ public class DataManager : MonoBehaviour
         return board.holdPiece.tetromino.ToString();
     }
 
+    public Tetromino GetHoldDataMino()
+    {
+        if (board == null || !board.TryGetHoldPiece(out TetrominoData holdData))
+        {
+            return Tetromino.None;
+        }
+
+        return holdData.tetromino;
+    }
+
+    public Tetromino GetCurrentDataMino()
+    {
+        if (board == null || !board.TryGetActivePieceData(out TetrominoData activeData))
+        {
+            return Tetromino.None;
+        }
+
+        return activeData.tetromino;
+    }
+
+    public bool GetCanHold()
+    {
+        return board.CanHold;
+
+    }
+
     public string[] GetPreviewData()
     {
         List<TetrominoData> preview = board.GetPreviewPieces();
@@ -148,5 +175,20 @@ public class DataManager : MonoBehaviour
         Debug.Log("Preview Data:" + row); 
 
         return previewStrings; 
+    }
+
+    public List<Tetromino> GetPreviewDataMino()
+    {
+        List<Tetromino> minos = new();
+        if (board == null)
+        {
+            return minos;
+        }
+
+        foreach (var data in board.GetPreviewPieces())
+        {
+            minos.Add(data.tetromino);
+        }
+        return minos;
     }
 }
