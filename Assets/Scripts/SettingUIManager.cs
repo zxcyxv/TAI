@@ -6,11 +6,13 @@ public class SettingUIManager : MonoBehaviour
 {
     [SerializeField] private GameObject settingUI;
     [SerializeField] private TextMeshProUGUI isBotActivated;
-    [SerializeField] private TextMeshProUGUI isRecording;
     [SerializeField] private TextMeshProUGUI isConnectBot;
     [SerializeField] private TMP_InputField waitTimeInput;
+    [SerializeField] private TMP_InputField datasetCountInput;
 
+    // 봇 연결 상태 불러오기
     [SerializeField] private ColdClearAgent agent;
+    // 봇 활성화 유무 불러오기
     [SerializeField] private ControlCommandManager ccm;
 
     private bool settingUIEnabled = false;
@@ -30,19 +32,9 @@ public class SettingUIManager : MonoBehaviour
     public void SetWaitTime()
     {
         if (float.TryParse(waitTimeInput.text, out float result)) {
-            if (result >= 0.1f) ccm.hardDropQueueDelay = (float)System.Math.Round(result, 2);
+            if (result >= 0.01f) ccm.hardDropQueueDelay = (float)System.Math.Round(result, 2);
             TextWaitTimeInput(ccm.hardDropQueueDelay);
         }
-    }
-
-    public void RecordStart()
-    {
-        TextIsRecording(true);
-    }
-
-    public void RecordStop()
-    {
-        TextIsRecording(false);
     }
 
     public void DataSetSave()
@@ -61,7 +53,6 @@ public class SettingUIManager : MonoBehaviour
     {
         if (!settingUIEnabled) return;
         TextIsBotActivated(agent.enableBot);
-        TextIsRecording(false);
         TextIsConnectBot(false);
         TextWaitTimeInput(ccm.hardDropQueueDelay);
     }
@@ -82,11 +73,6 @@ public class SettingUIManager : MonoBehaviour
         else isBotActivated.text = "봇 비활성화 됨";
     }
 
-    private void TextIsRecording(bool isRec)
-    {
-        if (isRec) isRecording.text = "기록 저장 중 O";
-        else isRecording.text = "기록 저장 중 X";
-    }
 
     private void TextIsConnectBot(bool isConnect)
     {
