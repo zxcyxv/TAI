@@ -349,6 +349,8 @@ public class ColdClearAgent : MonoBehaviour
                 }
             }
 
+            DataHandler.Instance?.AttachAction(move.hold, move.expected_x, move.expected_y);
+
             if (!ColdClearAdapter.TryBuildCommandSequence(move, commandBuffer))
             {
                 Debug.LogWarning("[ColdClearAgent] Cold Clear returned an empty or unsupported move.");

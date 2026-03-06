@@ -9,6 +9,9 @@ public class BoardData
     Tetromino currentPiece;
     int[,] boardData;
     string cotReason;
+    bool actionHold;
+    byte[] actionX;
+    byte[] actionY;
 
     public BoardData(bool canHold, Tetromino holdedPiece, List<Tetromino> previewPiece, Tetromino currentPiece, int[,] boardData)
     {
@@ -25,6 +28,13 @@ public class BoardData
     public void SetCoT(string reason)
     {
         cotReason = reason ?? "";
+    }
+
+    public void SetAction(bool hold, byte[] x, byte[] y)
+    {
+        actionHold = hold;
+        actionX = x;
+        actionY = y;
     }
 
     private string ToJsonCanHold()
@@ -99,6 +109,21 @@ public class BoardData
         return "\"cotReason\":\"" + escaped + "\"";
     }
 
+    private string ToJsonAction()
+    {
+        StringBuilder sb = new StringBuilder(128);
+        sb.Append("\"action\":{");
+        sb.Append("\"hold\":").Append(actionHold ? "true" : "false").Append(',');
+        sb.Append("\"x\":[");
+        if (actionX != null)
+            for (int i = 0; i < actionX.Length; i++) { if (i > 0) sb.Append(','); sb.Append(actionX[i]); }
+        sb.Append("],\"y\":[");
+        if (actionY != null)
+            for (int i = 0; i < actionY.Length; i++) { if (i > 0) sb.Append(','); sb.Append(actionY[i]); }
+        sb.Append("]}");
+        return sb.ToString();
+    }
+
     public string ToJson()
     {
         StringBuilder sb = new StringBuilder(512);
@@ -108,6 +133,7 @@ public class BoardData
         sb.Append(ToJsonPreviewPiece()); sb.Append(',');
         sb.Append(ToJsonCurrentPiece()); sb.Append(',');
         sb.Append(ToJsonBoard()); sb.Append(',');
+        sb.Append(ToJsonAction()); sb.Append(',');
         sb.Append(ToJsonCoT());
         sb.Append('}');
         return sb.ToString();

@@ -99,6 +99,12 @@ public class DataHandler : MonoBehaviour
         pendingStep?.SetCoT(cotReason);
     }
 
+    // Called by ColdClearAgent with the chosen move — attaches action label to latest step
+    public void AttachAction(bool hold, byte[] expectedX, byte[] expectedY)
+    {
+        pendingStep?.SetAction(hold, expectedX, expectedY);
+    }
+
     // Called by Board on GameOver — discards incomplete games
     public void OnGameOver()
     {
