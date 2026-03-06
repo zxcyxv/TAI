@@ -386,6 +386,7 @@ public class Board : MonoBehaviour
         }
 
         isRestarting = true;
+        DataHandler.Instance?.OnGameOver();
         RestartGame();
         isRestarting = false;
     }

@@ -8,6 +8,7 @@ public class BoardData
     List<Tetromino> previewPiece;
     Tetromino currentPiece;
     int[,] boardData;
+    string cotReason;
 
     public BoardData(bool canHold, Tetromino holdedPiece, List<Tetromino> previewPiece, Tetromino currentPiece, int[,] boardData)
     {
@@ -18,6 +19,12 @@ public class BoardData
 
         this.currentPiece = currentPiece;
         this.boardData = boardData;
+        this.cotReason = "";
+    }
+
+    public void SetCoT(string reason)
+    {
+        cotReason = reason ?? "";
     }
 
     private string ToJsonCanHold()
@@ -86,6 +93,12 @@ public class BoardData
         return sb.ToString();
     }
 
+    private string ToJsonCoT()
+    {
+        string escaped = (cotReason ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return "\"cotReason\":\"" + escaped + "\"";
+    }
+
     public string ToJson()
     {
         StringBuilder sb = new StringBuilder(512);
@@ -94,7 +107,8 @@ public class BoardData
         sb.Append(ToJsonHoldedPiece()); sb.Append(',');
         sb.Append(ToJsonPreviewPiece()); sb.Append(',');
         sb.Append(ToJsonCurrentPiece()); sb.Append(',');
-        sb.Append(ToJsonBoard());
+        sb.Append(ToJsonBoard()); sb.Append(',');
+        sb.Append(ToJsonCoT());
         sb.Append('}');
         return sb.ToString();
     }

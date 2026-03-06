@@ -72,6 +72,37 @@ public static class ColdClearNative
         };
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CCEvalTrace
+    {
+        public int clear_score;
+        public int tspin_score;
+        public int pc_score;
+        public int b2b_score;
+        public int combo_score;
+        public int wasted_t;
+        public int height_penalty;
+        public int jeopardy_penalty;
+        public int well_score;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public int[] tslot_score;
+        public int bumpiness_penalty;
+        public int hole_penalty;
+        public int covered_penalty;
+        public int row_transitions;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CCCandidate
+    {
+        public CCPiece piece;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_x;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_y;
+        [MarshalAs(UnmanagedType.I1)] public bool hold;
+        public int eval_score;
+        [MarshalAs(UnmanagedType.I1)] public bool has_trace;
+        public CCEvalTrace trace;
+    }
+
     // defaults
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     public static extern void cc_default_options(out CCOptions options);
@@ -103,12 +134,16 @@ public static class ColdClearNative
         IntPtr bot,
         ref CCMove move,
         IntPtr plan,
-        IntPtr plan_length);
+        IntPtr plan_length,
+        IntPtr candidates,
+        ref uint candidate_count);
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     public static extern CCBotPollStatus cc_block_next_move(
         IntPtr bot,
         ref CCMove move,
         IntPtr plan,
-        IntPtr plan_length);
+        IntPtr plan_length,
+        IntPtr candidates,
+        ref uint candidate_count);
 }
