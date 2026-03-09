@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
@@ -28,8 +27,6 @@ public class DataManager : MonoBehaviour
     [SerializeField] private DataHandler dataHandler;
     [SerializeField] private List<ControlCommand> commands = new List<ControlCommand>();
 
-    private int[,] boardData;
-    
     private List<ControlCommand> sampleCommands = new List<ControlCommand>()
     {
         ControlCommand.MoveLeft,
@@ -90,36 +87,19 @@ public class DataManager : MonoBehaviour
 
     public int[,] GetBoardData()
     {
+        int hiddenHeight = board != null ? Mathf.Max(0, board.additionalHeight) : 0;
+        return CaptureBoardRows(20 + hiddenHeight, 0);
+    }
 
-        int width = 10;
-        int height = 20 + Mathf.Max(0, board != null ? board.additionalHeight : 0);
+    public int[,] GetBoardVisible()
+    {
+        return CaptureBoardRows(20, 0);
+    }
 
-        boardData = new int[width, height];
-
-        if (board == null || board.tilemap == null)
-        {
-            return boardData;
-        }
-
-        RectInt bounds = board.Bounds;
-        Tilemap boardTilemap = board.tilemap;
-
-        int maxWidth = Mathf.Min(width, bounds.width);
-        int maxHeight = Mathf.Min(height, bounds.height);
-
-        for (int x = 0; x < maxWidth; x++)
-        {
-            for (int y = 0; y < maxHeight; y++)
-            {
-                int worldX = bounds.xMin + x;
-                int worldY = bounds.yMin + y;
-                Vector3Int tilePosition = new Vector3Int(worldX, worldY, 0);
-
-                boardData[x, y] = boardTilemap.HasTile(tilePosition) ? 1 : 0;
-            }
-        }
-        
-        return boardData;
+    public int[,] GetBoardHidden()
+    {
+        int hiddenHeight = board != null ? Mathf.Max(0, board.additionalHeight) : 0;
+        return CaptureBoardRows(hiddenHeight, 20);
     }
 
     public string GetHoldData()
@@ -152,7 +132,16 @@ public class DataManager : MonoBehaviour
     public bool GetCanHold()
     {
         return board.CanHold;
+    }
 
+    public int GetCombo()
+    {
+        return board != null ? board.GetCombo() : 0;
+    }
+
+    public int GetB2BChain()
+    {
+        return board != null ? board.GetB2BChain() : 0;
     }
 
     public string[] GetPreviewData()
@@ -190,5 +179,31 @@ public class DataManager : MonoBehaviour
             minos.Add(data.tetromino);
         }
         return minos;
+    }
+
+    private int[,] CaptureBoardRows(int rows, int rowOffset)
+    {
+        int[,] data = new int[Mathf.Max(0, rows), 10];
+        if (rows <= 0 || board == null || board.tilemap == null)
+        {
+            return data;
+        }
+
+        RectInt bounds = board.Bounds;
+        Tilemap boardTilemap = board.tilemap;
+        int maxRows = Mathf.Min(rows, Mathf.Max(0, bounds.height - rowOffset));
+        int maxCols = Mathf.Min(10, bounds.width);
+
+        for (int row = 0; row < maxRows; row++)
+        {
+            for (int col = 0; col < maxCols; col++)
+            {
+                int worldX = bounds.xMin + col;
+                int worldY = bounds.yMin + rowOffset + row;
+                data[row, col] = boardTilemap.HasTile(new Vector3Int(worldX, worldY, 0)) ? 1 : 0;
+            }
+        }
+
+        return data;
     }
 }

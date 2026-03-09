@@ -384,7 +384,6 @@ MonoBehaviour:
   targetGames: 5000
   stepsPerGame: 100
   gamesPerFile: 100
-  board: {fileID: 0}
   completedGames: 0
   currentStepCount: 0
   collectionDone: 0
@@ -2696,7 +2695,7 @@ MonoBehaviour:
     tile: {fileID: 11400000, guid: 11bbe31ead61847af976cc012b533078, type: 2}
   spawnPosition: {x: -1, y: 7, z: 0}
   boradSize: {x: 10, y: 20}
-  additionalHeight: 3
+  additionalHeight: 2
   previewSize: 5
   score: 0
   totalAttack: 0

@@ -152,6 +152,10 @@ impl Evaluator for Standard {
         val.value
     }
 
+    fn get_spike(&self, val: &Value) -> i32 {
+        val.spike
+    }
+
     fn into_standard_trace(&self, _trace: &super::standard::EvalTrace) -> Option<super::standard::EvalTrace> {
         None
     }

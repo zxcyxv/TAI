@@ -25,6 +25,10 @@ pub trait Evaluator: Send + Sync {
         0
     }
 
+    fn get_spike(&self, _val: &Self::Value) -> i32 {
+        0
+    }
+
     fn into_standard_trace(&self, _trace: &Self::Trace) -> Option<crate::evaluation::standard::EvalTrace> {
         None
     }
@@ -75,6 +79,10 @@ impl<T: Evaluator> Evaluator for std::sync::Arc<T> {
 
     fn get_value(&self, val: &Self::Value) -> i32 {
         (**self).get_value(val)
+    }
+
+    fn get_spike(&self, val: &Self::Value) -> i32 {
+        (**self).get_spike(val)
     }
 
     fn into_standard_trace(&self, trace: &Self::Trace) -> Option<crate::evaluation::standard::EvalTrace> {

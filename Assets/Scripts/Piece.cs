@@ -297,6 +297,11 @@ public class Piece : MonoBehaviour
         DataManager.Instance?.GetHoldData();
         DataManager.Instance?.GetPreviewData();
 
+        if (DataHandler.Instance != null && DataHandler.Instance.ConsumePendingRestartAfterLock())
+        {
+            return;
+        }
+
         board.SpawnPiece();
     }
 

@@ -17,13 +17,15 @@ public class DataHandler : MonoBehaviour
     [SerializeField] private int currentStepCount;
     [SerializeField] private bool collectionDone;
 
-    private readonly List<BoardData> currentGameSteps = new List<BoardData>(100);
-    private BoardData pendingStep;
+    private readonly List<DecisionPacket> currentGameSteps = new List<DecisionPacket>(100);
+    private DecisionPacket pendingStep;
     private bool updated = true;
     private StreamWriter writer;
     private string datasetsDir;
     private int currentFileIndex;
+    private int currentEpisodeId;
     private Board board;
+    private bool pendingRestartAfterLock;
 
     void Awake()
     {
@@ -73,69 +75,105 @@ public class DataHandler : MonoBehaviour
         }
     }
 
-    // Called by Board every time the board state changes
     public void UpdateBoard()
     {
         updated = false;
     }
 
-    // Called by Board at piece spawn — captures one step
     public void SaveData()
     {
-        if (collectionDone) return;
-        if (updated) return;
-        if (DataManager.Instance == null) return;
+        if (collectionDone || updated || DataManager.Instance == null)
+        {
+            return;
+        }
 
         updated = true;
+        pendingStep = new DecisionPacket
+        {
+            boardVisible = DataManager.Instance.GetBoardVisible(),
+            boardHidden = DataManager.Instance.GetBoardHidden(),
+            currentPiece = DecisionPacket.PieceToString(DataManager.Instance.GetCurrentDataMino()),
+            holdPiece = DecisionPacket.PieceToString(DataManager.Instance.GetHoldDataMino()),
+            nextVisible = DecisionPacket.ConvertPieces(DataManager.Instance.GetPreviewDataMino()),
+            canHold = DataManager.Instance.GetCanHold(),
+            combo = DataManager.Instance.GetCombo(),
+            b2bChain = DataManager.Instance.GetB2BChain(),
+            candidates = new List<CandidateData>()
+        };
+    }
 
-        pendingStep = new BoardData(
-            DataManager.Instance.GetCanHold(),
-            DataManager.Instance.GetHoldDataMino(),
-            DataManager.Instance.GetPreviewDataMino(),
-            DataManager.Instance.GetCurrentDataMino(),
-            DataManager.Instance.GetBoardData()
-        );
+    public void AttachDecision(
+        List<CandidateData> candidates,
+        ColdClearNative.CCDecisionInfo decisionInfo,
+        ColdClearNative.CCMove move)
+    {
+        if (pendingStep == null)
+        {
+            return;
+        }
+
+        pendingStep.nodes = move.nodes;
+        pendingStep.depth = move.depth;
+        pendingStep.decisionMode = decisionInfo.decision_mode;
+        pendingStep.chosenIdx = (int)decisionInfo.chosen_idx;
+        pendingStep.candidates = candidates ?? new List<CandidateData>();
+        pendingStep.actionHold = move.hold;
+        pendingStep.actionX = DecisionPacket.CopyBytes(move.expected_x);
+        pendingStep.actionY = DecisionPacket.CopyBytes(move.expected_y);
+        pendingStep.actionToken = PlacementToken.FromNative(
+            move.hold,
+            pendingStep.currentPiece,
+            move.expected_x,
+            move.expected_y);
 
         currentGameSteps.Add(pendingStep);
         currentStepCount = currentGameSteps.Count;
+        pendingStep = null;
 
         if (currentGameSteps.Count >= stepsPerGame)
         {
-            FinishCurrentGame();
+            pendingRestartAfterLock = true;
         }
     }
 
-    // Called by ColdClearAgent after CoT is generated — attaches reasoning to latest step
-    public void AttachCoT(string cotReason)
-    {
-        pendingStep?.SetCoT(cotReason);
-    }
-
-    // Called by ColdClearAgent with the chosen move — attaches action label to latest step
-    public void AttachAction(bool hold, byte[] expectedX, byte[] expectedY)
-    {
-        pendingStep?.SetAction(hold, expectedX, expectedY);
-    }
-
-    // Called by Board on GameOver — discards incomplete games
     public void OnGameOver()
     {
-        if (collectionDone) return;
+        if (collectionDone)
+        {
+            return;
+        }
 
-        // Game ended before reaching stepsPerGame — discard partial data
-        currentGameSteps.Clear();
-        currentStepCount = 0;
-        pendingStep = null;
+        FinishCurrentGame(false);
     }
 
-    private void FinishCurrentGame()
+    public bool ConsumePendingRestartAfterLock()
     {
-        WriteGameToFile(completedGames + 1, currentGameSteps);
+        if (!pendingRestartAfterLock)
+        {
+            return false;
+        }
+
+        pendingRestartAfterLock = false;
+        FinishCurrentGame(true);
+        return true;
+    }
+
+    private void FinishCurrentGame(bool gameComplete)
+    {
+        if (currentGameSteps.Count == 0)
+        {
+            pendingStep = null;
+            return;
+        }
+
+        currentEpisodeId++;
+        WriteGameToFile(currentEpisodeId, currentGameSteps, gameComplete);
 
         completedGames++;
         currentGameSteps.Clear();
         currentStepCount = 0;
         pendingStep = null;
+        pendingRestartAfterLock = false;
 
         Debug.Log($"[DataHandler] Game {completedGames}/{targetGames} collected.");
 
@@ -154,42 +192,45 @@ public class DataHandler : MonoBehaviour
             OpenNextFile();
         }
 
-        // Force-restart the board to start the next game cleanly
-        board?.RestartGame();
+        if (gameComplete)
+        {
+            board?.RestartGame();
+        }
     }
 
-    private void WriteGameToFile(int gameIndex, List<BoardData> steps)
+    private void WriteGameToFile(int gameIndex, List<DecisionPacket> steps, bool gameComplete)
     {
-        if (writer == null) return;
-
-        StringBuilder sb = new StringBuilder(steps.Count * 512);
-        sb.Append("{\"game\":");
-        sb.Append(gameIndex);
-        sb.Append(",\"steps\":[");
+        if (writer == null)
+        {
+            return;
+        }
 
         for (int i = 0; i < steps.Count; i++)
         {
-            if (i > 0) sb.Append(',');
-            sb.Append(steps[i].ToJson());
+            steps[i].episodeId = gameIndex;
+            steps[i].stepId = i;
+            steps[i].gameComplete = gameComplete;
+            writer.WriteLine(steps[i].ToJson());
         }
-
-        sb.Append("]}");
-        writer.WriteLine(sb.ToString());
     }
 
     public void SetTargetGames(int count)
     {
-        if (count <= 0) return;
+        if (count <= 0)
+        {
+            return;
+        }
+
         targetGames = count;
         Debug.Log($"[DataHandler] targetGames set to {targetGames}");
     }
 
-    // Legacy helper — kept for compatibility
     public void ClearData()
     {
         currentGameSteps.Clear();
         currentStepCount = 0;
         pendingStep = null;
+        pendingRestartAfterLock = false;
         updated = true;
     }
 }

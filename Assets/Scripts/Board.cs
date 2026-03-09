@@ -148,6 +148,8 @@ public class Board : MonoBehaviour
     public int TotalAttack => totalAttack;
     public int Combo => Mathf.Max(0, combo);
     public int BackToBackChain => backToBackChain;
+    public int GetCombo() => Mathf.Max(0, combo);
+    public int GetB2BChain() => backToBackChain;
     public ScoreResult LastScoreResult { get; private set; }
     public Spin LastLockSpin { get; private set; } = Spin.None;
     public event Action<TetrominoData> PieceSpawned;

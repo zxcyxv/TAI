@@ -14,8 +14,6 @@ public class ColdClearAgent : MonoBehaviour
     [SerializeField] private uint incomingGarbage;
     [SerializeField] private bool verboseLogging;
 
-    public string LastCoTReason { get; private set; } = "";
-
     private const int MaxCandidates = 10;
 
     private readonly List<ControlCommand> commandBuffer = new List<ControlCommand>(40);
@@ -309,6 +307,7 @@ public class ColdClearAgent : MonoBehaviour
     private void PollNextMove()
     {
         ColdClearNative.CCMove move = ColdClearNative.CCMove.CreateBuffer();
+        ColdClearNative.CCDecisionInfo decisionInfo = default;
         int candidateSize = Marshal.SizeOf<ColdClearNative.CCCandidate>();
         IntPtr candidatePtr = Marshal.AllocHGlobal(candidateSize * MaxCandidates);
 
@@ -321,7 +320,8 @@ public class ColdClearAgent : MonoBehaviour
                 IntPtr.Zero,
                 IntPtr.Zero,
                 candidatePtr,
-                ref candidateCount);
+                ref candidateCount,
+                ref decisionInfo);
 
             if (status == ColdClearNative.CCBotPollStatus.CC_WAITING)
             {
@@ -337,19 +337,16 @@ public class ColdClearAgent : MonoBehaviour
                 return;
             }
 
-            if (candidateCount >= 2)
+            List<CandidateData> candidates = new List<CandidateData>((int)candidateCount);
+            for (int i = 0; i < candidateCount; i++)
             {
-                var best     = Marshal.PtrToStructure<ColdClearNative.CCCandidate>(candidatePtr);
-                var runnerUp = Marshal.PtrToStructure<ColdClearNative.CCCandidate>(candidatePtr + candidateSize);
-                LastCoTReason = GenerateCoT(best, runnerUp);
-                DataHandler.Instance?.AttachCoT(LastCoTReason);
-                if (verboseLogging)
-                {
-                    Debug.Log($"[ColdClearAgent] CoT: {LastCoTReason}");
-                }
+                IntPtr currentPtr = candidatePtr + (i * candidateSize);
+                ColdClearNative.CCCandidate nativeCandidate =
+                    Marshal.PtrToStructure<ColdClearNative.CCCandidate>(currentPtr);
+                candidates.Add(CandidateData.FromNative(i, nativeCandidate));
             }
 
-            DataHandler.Instance?.AttachAction(move.hold, move.expected_x, move.expected_y);
+            DataHandler.Instance?.AttachDecision(candidates, decisionInfo, move);
 
             if (!ColdClearAdapter.TryBuildCommandSequence(move, commandBuffer))
             {
@@ -366,97 +363,6 @@ public class ColdClearAgent : MonoBehaviour
         {
             Marshal.FreeHGlobal(candidatePtr);
         }
-    }
-
-    private static string GenerateCoT(
-        ColdClearNative.CCCandidate best,
-        ColdClearNative.CCCandidate runnerUp)
-    {
-        if (!best.has_trace || !runnerUp.has_trace)
-        {
-            return "AI chose this move based on overall evaluation.";
-        }
-
-        ColdClearNative.CCEvalTrace t0 = best.trace;
-        ColdClearNative.CCEvalTrace t1 = runnerUp.trace;
-
-        // Delta: positive = best move is better in that category
-        int deltaJeopardy   = t1.jeopardy_penalty  - t0.jeopardy_penalty;  // less penalty = safer
-        int deltaBumpiness  = t1.bumpiness_penalty - t0.bumpiness_penalty;  // less penalty = smoother
-        int deltaTspin      = t0.tspin_score        - t1.tspin_score;
-        int deltaTslot      = SumTslot(t0.tslot_score) - SumTslot(t1.tslot_score);
-        int deltaHeight     = t1.height_penalty     - t0.height_penalty;    // less penalty = lower height
-        int deltaHole       = t1.hole_penalty       - t0.hole_penalty;      // less penalty = fewer holes
-        int deltaClear      = t0.clear_score        - t1.clear_score;
-
-        // Find the dominant reason
-        int maxDelta = 0;
-        string reason = "AI chose this move based on overall evaluation.";
-
-        if (System.Math.Abs(deltaJeopardy) > maxDelta)
-        {
-            maxDelta = System.Math.Abs(deltaJeopardy);
-            reason = deltaJeopardy > 0
-                ? "I chose this move to avoid a dangerous board height."
-                : "I accepted more height risk for a better overall position.";
-        }
-
-        if (System.Math.Abs(deltaTspin) > maxDelta)
-        {
-            maxDelta = System.Math.Abs(deltaTspin);
-            reason = deltaTspin > 0
-                ? "This move scores a T-Spin for high attack power."
-                : "I skipped a T-Spin for a more stable placement.";
-        }
-
-        if (System.Math.Abs(deltaTslot) > maxDelta)
-        {
-            maxDelta = System.Math.Abs(deltaTslot);
-            reason = deltaTslot > 0
-                ? "This move prepares a future T-Spin opportunity."
-                : "I gave up a T-Spin slot for a safer position.";
-        }
-
-        if (System.Math.Abs(deltaBumpiness) > maxDelta)
-        {
-            maxDelta = System.Math.Abs(deltaBumpiness);
-            reason = deltaBumpiness > 0
-                ? "This keeps the stack flatter for better flexibility."
-                : "I accepted an uneven stack for a tactical advantage.";
-        }
-
-        if (System.Math.Abs(deltaHeight) > maxDelta)
-        {
-            maxDelta = System.Math.Abs(deltaHeight);
-            reason = deltaHeight > 0
-                ? "This move lowers the overall stack height."
-                : "I built higher to set up a stronger attack.";
-        }
-
-        if (System.Math.Abs(deltaHole) > maxDelta)
-        {
-            maxDelta = System.Math.Abs(deltaHole);
-            reason = deltaHole > 0
-                ? "This avoids creating holes that are hard to clear."
-                : "I accepted holes in exchange for a better structure.";
-        }
-
-        if (System.Math.Abs(deltaClear) > maxDelta)
-        {
-            reason = deltaClear > 0
-                ? "This move clears lines to reduce the stack immediately."
-                : "I held off on clearing to build a better attack.";
-        }
-
-        return reason;
-    }
-
-    private static int SumTslot(int[] tslot)
-    {
-        if (tslot == null) return 0;
-        int sum = 0;
-        for (int i = 0; i < tslot.Length; i++) sum += tslot[i];
-        return sum;
     }
 
     private void ShutdownBot()

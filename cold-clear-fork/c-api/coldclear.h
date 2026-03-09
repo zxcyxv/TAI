@@ -75,6 +75,48 @@ typedef struct CCMove {
     uint32_t original_rank;
 } CCMove;
 
+typedef struct CCEvalTrace {
+    int32_t clear_score;
+    int32_t tspin_score;
+    int32_t pc_score;
+    int32_t b2b_score;
+    int32_t combo_score;
+    int32_t wasted_t;
+    int32_t height_penalty;
+    int32_t jeopardy_penalty;
+    int32_t well_score;
+    int32_t tslot_score[4];
+    int32_t bumpiness_penalty;
+    int32_t hole_penalty;
+    int32_t covered_penalty;
+    int32_t row_transitions;
+} CCEvalTrace;
+
+typedef struct CCCandidate {
+    CCPiece piece;
+    uint8_t expected_x[4];
+    uint8_t expected_y[4];
+    bool hold;
+    int32_t eval_score;
+    bool has_trace;
+    CCEvalTrace trace;
+    int32_t spike_score;
+    uint32_t original_rank;
+    uint8_t placement_kind;
+    bool b2b;
+    bool perfect_clear;
+    int32_t combo;
+    uint32_t garbage_sent;
+    int32_t cleared_lines[4];
+    bool survival_pass;
+} CCCandidate;
+
+typedef struct CCDecisionInfo {
+    uint8_t decision_mode;
+    uint32_t chosen_idx;
+    uint32_t candidate_count;
+} CCDecisionInfo;
+
 typedef struct CCOptions {
     CCMovementMode mode;
     CCSpawnRule spawn_rule;
@@ -236,7 +278,10 @@ CCBotPollStatus cc_poll_next_move(
     CCAsyncBot *bot,
     CCMove *move,
     CCPlanPlacement* plan,
-    uint32_t *plan_length
+    uint32_t *plan_length,
+    CCCandidate *candidates,
+    uint32_t *candidate_count,
+    CCDecisionInfo *decision_info
 );
 
 /* This function is the same as `cc_poll_next_move` except when `cc_poll_next_move` would return
@@ -249,7 +294,10 @@ CCBotPollStatus cc_block_next_move(
     CCAsyncBot *bot,
     CCMove *move,
     CCPlanPlacement* plan,
-    uint32_t *plan_length
+    uint32_t *plan_length,
+    CCCandidate *candidates,
+    uint32_t *candidate_count,
+    CCDecisionInfo *decision_info
 );
 
 /* Returns the default options in the options parameter */

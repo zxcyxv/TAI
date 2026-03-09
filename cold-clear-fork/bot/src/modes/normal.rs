@@ -1,3 +1,4 @@
+use arrayvec::ArrayVec;
 use enum_map::EnumMap;
 use libtetris::*;
 use opening_book::Book;
@@ -149,14 +150,44 @@ impl<E: Evaluator> BotState<E> {
         };
 
         let mut candidate_infos = Vec::new();
+        let mut first_survival_pass = false;
+        let mut any_survival_pass = false;
         for mv in &candidates {
+            let survival_pass = incoming == 0
+                || mv.board.column_heights()[3..6]
+                    .iter()
+                    .all(|h| incoming as i32 - mv.lock.garbage_sent as i32 + h <= 20);
+            if candidate_infos.is_empty() {
+                first_survival_pass = survival_pass;
+            }
+            any_survival_pass |= survival_pass;
+
             candidate_infos.push(CandidateInfo {
                 move_piece: mv.mv,
                 hold: mv.hold,
                 eval_score: eval.get_value(&mv.evaluation),
+                spike_score: eval.get_spike(&mv.evaluation),
                 trace: eval.into_standard_trace(&mv.trace),
+                original_rank: mv.original_rank,
+                placement_kind: mv.lock.placement_kind,
+                b2b: mv.lock.b2b,
+                perfect_clear: mv.lock.perfect_clear,
+                combo: mv.lock.combo,
+                garbage_sent: mv.lock.garbage_sent,
+                cleared_lines: mv.lock.cleared_lines.clone(),
+                survival_pass,
             });
         }
+
+        let decision_mode = if book_move.is_some() {
+            DecisionMode::Book
+        } else if first_survival_pass {
+            DecisionMode::Normal
+        } else if any_survival_pass {
+            DecisionMode::SurviveFilter
+        } else {
+            DecisionMode::SpikeBackup
+        };
 
         let info = if book_move.is_some() {
             crate::Info::Book
@@ -173,6 +204,7 @@ impl<E: Evaluator> BotState<E> {
                     self.tree.depth() as u32
                 },
                 original_rank: child.original_rank,
+                decision_mode,
                 plan,
                 candidates: candidate_infos,
             })
@@ -316,11 +348,28 @@ impl Thinker {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+pub enum DecisionMode {
+    Book,
+    Normal,
+    SurviveFilter,
+    SpikeBackup,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
 pub struct CandidateInfo {
     pub move_piece: FallingPiece,
     pub hold: bool,
     pub eval_score: i32,
+    pub spike_score: i32,
     pub trace: Option<crate::evaluation::standard::EvalTrace>,
+    pub original_rank: u32,
+    pub placement_kind: PlacementKind,
+    pub b2b: bool,
+    pub perfect_clear: bool,
+    pub combo: Option<u32>,
+    pub garbage_sent: u32,
+    pub cleared_lines: ArrayVec<[i32; 4]>,
+    pub survival_pass: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
@@ -328,6 +377,7 @@ pub struct Info {
     pub nodes: u32,
     pub depth: u32,
     pub original_rank: u32,
+    pub decision_mode: DecisionMode,
     pub plan: Vec<(FallingPiece, LockResult)>,
     pub candidates: Vec<CandidateInfo>,
 }

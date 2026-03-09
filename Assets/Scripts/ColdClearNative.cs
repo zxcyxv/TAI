@@ -101,6 +101,23 @@ public static class ColdClearNative
         public int eval_score;
         [MarshalAs(UnmanagedType.I1)] public bool has_trace;
         public CCEvalTrace trace;
+        public int spike_score;
+        public uint original_rank;
+        public byte placement_kind;
+        [MarshalAs(UnmanagedType.I1)] public bool b2b;
+        [MarshalAs(UnmanagedType.I1)] public bool perfect_clear;
+        public int combo;
+        public uint garbage_sent;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public int[] cleared_lines;
+        [MarshalAs(UnmanagedType.I1)] public bool survival_pass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CCDecisionInfo
+    {
+        public byte decision_mode;
+        public uint chosen_idx;
+        public uint candidate_count;
     }
 
     // defaults
@@ -136,7 +153,8 @@ public static class ColdClearNative
         IntPtr plan,
         IntPtr plan_length,
         IntPtr candidates,
-        ref uint candidate_count);
+        ref uint candidate_count,
+        ref CCDecisionInfo decisionInfo);
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     public static extern CCBotPollStatus cc_block_next_move(
@@ -145,5 +163,6 @@ public static class ColdClearNative
         IntPtr plan,
         IntPtr plan_length,
         IntPtr candidates,
-        ref uint candidate_count);
+        ref uint candidate_count,
+        ref CCDecisionInfo decisionInfo);
 }

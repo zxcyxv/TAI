@@ -6,7 +6,8 @@ use std::sync::Arc;
 use cold_clear::PcPriority;
 use enumset::EnumSet;
 use libtetris::{
-    Board, FallingPiece, LockResult, MovementMode, Piece, PieceMovement, SpawnRule, TspinStatus,
+    Board, FallingPiece, LockResult, MovementMode, Piece, PieceMovement, PlacementKind, SpawnRule,
+    TspinStatus,
 };
 
 type CCAsyncBot = cold_clear::Interface;
@@ -169,6 +170,23 @@ pub struct CCCandidate {
     pub eval_score: i32,
     pub has_trace: bool,
     pub trace: CCEvalTrace,
+    pub spike_score: i32,
+    pub original_rank: u32,
+    pub placement_kind: u8,
+    pub b2b: bool,
+    pub perfect_clear: bool,
+    pub combo: i32,
+    pub garbage_sent: u32,
+    pub cleared_lines: [i32; 4],
+    pub survival_pass: bool,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct CCDecisionInfo {
+    pub decision_mode: u8,
+    pub chosen_idx: u32,
+    pub candidate_count: u32,
 }
 
 #[repr(C)]
@@ -465,12 +483,93 @@ fn convert_candidates(
                     eval_score: cand.eval_score,
                     has_trace,
                     trace,
+                    spike_score: cand.spike_score,
+                    original_rank: cand.original_rank,
+                    placement_kind: convert_placement_kind(cand.placement_kind),
+                    b2b: cand.b2b,
+                    perfect_clear: cand.perfect_clear,
+                    combo: cand.combo.map(|combo| combo as i32).unwrap_or(-1),
+                    garbage_sent: cand.garbage_sent,
+                    cleared_lines: to_cleared_lines(&cand.cleared_lines),
+                    survival_pass: cand.survival_pass,
                 });
             }
             *candidates_length = n as u32;
         } else {
             unsafe { *candidates_length = 0; }
         }
+    }
+}
+
+fn convert_placement_kind(kind: PlacementKind) -> u8 {
+    match kind {
+        PlacementKind::None => 0,
+        PlacementKind::Clear1 => 1,
+        PlacementKind::Clear2 => 2,
+        PlacementKind::Clear3 => 3,
+        PlacementKind::Clear4 => 4,
+        PlacementKind::MiniTspin => 5,
+        PlacementKind::MiniTspin1 => 6,
+        PlacementKind::MiniTspin2 => 7,
+        PlacementKind::Tspin => 8,
+        PlacementKind::Tspin1 => 9,
+        PlacementKind::Tspin2 => 10,
+        PlacementKind::Tspin3 => 11,
+    }
+}
+
+fn to_cleared_lines(lines: &[i32]) -> [i32; 4] {
+    let mut out = [-1; 4];
+    for (i, line) in lines.iter().enumerate().take(4) {
+        out[i] = *line;
+    }
+    out
+}
+
+fn convert_decision_mode(info: &cold_clear::Info) -> u8 {
+    match info {
+        cold_clear::Info::Book => 0,
+        cold_clear::Info::Normal(info) => match info.decision_mode {
+            cold_clear::modes::normal::DecisionMode::Book => 0,
+            cold_clear::modes::normal::DecisionMode::Normal => 1,
+            cold_clear::modes::normal::DecisionMode::SurviveFilter => 2,
+            cold_clear::modes::normal::DecisionMode::SpikeBackup => 3,
+        },
+        cold_clear::Info::PcLoop(_) => 1,
+    }
+}
+
+fn convert_decision_info(
+    info: &cold_clear::Info,
+    chosen_move: &libtetris::Move,
+    decision_info: *mut CCDecisionInfo,
+) {
+    if decision_info.is_null() {
+        return;
+    }
+
+    let (chosen_idx, candidate_count) = match info {
+        cold_clear::Info::Normal(ninfo) => {
+            let mut found = 0;
+            for (idx, candidate) in ninfo.candidates.iter().enumerate() {
+                if candidate.hold == chosen_move.hold
+                    && candidate.move_piece.same_location(&chosen_move.expected_location)
+                {
+                    found = idx as u32;
+                    break;
+                }
+            }
+            (found, ninfo.candidates.len() as u32)
+        }
+        _ => (0, 0),
+    };
+
+    unsafe {
+        decision_info.write(CCDecisionInfo {
+            decision_mode: convert_decision_mode(info),
+            chosen_idx,
+            candidate_count,
+        });
     }
 }
 
@@ -517,12 +616,14 @@ extern "C" fn cc_poll_next_move(
     plan_length: *mut u32,
     candidates: *mut MaybeUninit<CCCandidate>,
     candidates_length: *mut u32,
+    decision_info: *mut CCDecisionInfo,
 ) -> CCBotPollStatus {
     match bot.poll_next_move() {
         Ok((m, info)) => {
             bot.play_next_move(m.expected_location);
             convert_plan(&info, plan, plan_length);
             convert_candidates(&info, candidates, candidates_length);
+            convert_decision_info(&info, &m, decision_info);
             unsafe { mv.write(convert(m, info)) };
             CCBotPollStatus::CC_MOVE_PROVIDED
         }
@@ -539,12 +640,14 @@ extern "C" fn cc_block_next_move(
     plan_length: *mut u32,
     candidates: *mut MaybeUninit<CCCandidate>,
     candidates_length: *mut u32,
+    decision_info: *mut CCDecisionInfo,
 ) -> CCBotPollStatus {
     match bot.block_next_move() {
         Some((m, info)) => {
             bot.play_next_move(m.expected_location);
             convert_plan(&info, plan, plan_length);
             convert_candidates(&info, candidates, candidates_length);
+            convert_decision_info(&info, &m, decision_info);
             unsafe { mv.write(convert(m, info)) };
             CCBotPollStatus::CC_MOVE_PROVIDED
         }
