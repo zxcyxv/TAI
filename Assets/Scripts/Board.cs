@@ -289,7 +289,6 @@ public class Board : MonoBehaviour
         }
 
         Clear(activePiece);
-        DataHandler.Instance?.UpdateBoard();
 
         if (!hasHoldPiece)
         {

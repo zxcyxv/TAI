@@ -32,14 +32,17 @@ public class SettingUIManager : MonoBehaviour
     public void SetWaitTime()
     {
         if (float.TryParse(waitTimeInput.text, out float result)) {
-            if (result >= 0.01f) ccm.hardDropQueueDelay = (float)System.Math.Round(result, 2);
+            if (result >= 0f) ccm.hardDropQueueDelay = (float)System.Math.Round(result, 2);
             TextWaitTimeInput(ccm.hardDropQueueDelay);
         }
     }
 
     public void DataSetSave()
     {
-        
+        if (int.TryParse(datasetCountInput.text, out int count))
+        {
+            DataHandler.Instance?.SetTargetGames(count);
+        }
     }
 
     public void SettingUIEnable(bool enable)

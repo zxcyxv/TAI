@@ -10,7 +10,7 @@ public class DataHandler : MonoBehaviour
     [Header("Collection Settings")]
     [SerializeField] private int targetGames = 5000;
     [SerializeField] private int stepsPerGame = 100;
-    [SerializeField] private Board board;
+    [SerializeField] private int gamesPerFile = 100;
 
     [Header("Runtime Info (Read Only)")]
     [SerializeField] private int completedGames;
@@ -21,7 +21,9 @@ public class DataHandler : MonoBehaviour
     private BoardData pendingStep;
     private bool updated = true;
     private StreamWriter writer;
-    private string outputPath;
+    private string datasetsDir;
+    private int currentFileIndex;
+    private Board board;
 
     void Awake()
     {
@@ -36,9 +38,11 @@ public class DataHandler : MonoBehaviour
             return;
         }
 
-        outputPath = Path.Combine(Application.persistentDataPath, "dataset.jsonl");
-        writer = new StreamWriter(outputPath, append: false, encoding: Encoding.UTF8);
-        Debug.Log($"[DataHandler] Dataset will be saved to: {outputPath}");
+        datasetsDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "datasets"));
+        Directory.CreateDirectory(datasetsDir);
+        currentFileIndex = 1;
+        OpenNextFile();
+        board = FindFirstObjectByType<Board>();
     }
 
     void OnDestroy()
@@ -49,6 +53,14 @@ public class DataHandler : MonoBehaviour
     void OnApplicationQuit()
     {
         FlushAndClose();
+    }
+
+    private void OpenNextFile()
+    {
+        FlushAndClose();
+        string path = Path.Combine(datasetsDir, $"dataset_{currentFileIndex:D4}.jsonl");
+        writer = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
+        Debug.Log($"[DataHandler] Writing to: {path}");
     }
 
     private void FlushAndClose()
@@ -131,9 +143,15 @@ public class DataHandler : MonoBehaviour
         {
             FlushAndClose();
             collectionDone = true;
-            Debug.Log($"[DataHandler] Collection complete! File: {outputPath}");
+            Debug.Log($"[DataHandler] Collection complete! Dir: {datasetsDir}");
             ColdClearAgent.Instance?.SetActive(false);
             return;
+        }
+
+        if (completedGames % gamesPerFile == 0)
+        {
+            currentFileIndex++;
+            OpenNextFile();
         }
 
         // Force-restart the board to start the next game cleanly
@@ -157,6 +175,13 @@ public class DataHandler : MonoBehaviour
 
         sb.Append("]}");
         writer.WriteLine(sb.ToString());
+    }
+
+    public void SetTargetGames(int count)
+    {
+        if (count <= 0) return;
+        targetGames = count;
+        Debug.Log($"[DataHandler] targetGames set to {targetGames}");
     }
 
     // Legacy helper — kept for compatibility

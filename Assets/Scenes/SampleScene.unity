@@ -381,6 +381,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9a430d4a234a941a9865dc091769301f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  targetGames: 5000
+  stepsPerGame: 100
+  gamesPerFile: 100
+  board: {fileID: 0}
+  completedGames: 0
+  currentStepCount: 0
+  collectionDone: 0
 --- !u!4 &161127411
 Transform:
   m_ObjectHideFlags: 0
@@ -2994,9 +3001,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   settingUI: {fileID: 1528360871}
   isBotActivated: {fileID: 1321317761}
-  isRecording: {fileID: 0}
   isConnectBot: {fileID: 1135825547}
   waitTimeInput: {fileID: 1984500256}
+  datasetCountInput: {fileID: 1431047310}
   agent: {fileID: 241608806}
   ccm: {fileID: 32116811}
 --- !u!1 &1098379915
