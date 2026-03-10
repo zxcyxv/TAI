@@ -139,6 +139,25 @@ struct CCPlanPlacement {
     expected_x: [u8; 4],
     expected_y: [u8; 4],
     cleared_lines: [i32; 4],
+    placement_kind: u8,
+    garbage_sent: u32,
+    b2b: bool,
+    combo: i32,
+}
+
+const CC_MAX_PV_STEPS: usize = 5;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct CCPVStep {
+    pub piece: CCPiece,
+    pub placement_kind: u8,
+    pub lines_cleared: u8,
+    pub garbage_sent: u32,
+    pub b2b: bool,
+    pub combo: i32,
+    pub expected_x: [u8; 4],
+    pub expected_y: [u8; 4],
 }
 
 #[repr(C)]
@@ -179,6 +198,9 @@ pub struct CCCandidate {
     pub garbage_sent: u32,
     pub cleared_lines: [i32; 4],
     pub survival_pass: bool,
+    pub board_after: [u8; 220],
+    pub pv_len: u8,
+    pub pv_steps: [CCPVStep; CC_MAX_PV_STEPS],
 }
 
 #[repr(C)]
@@ -187,6 +209,16 @@ pub struct CCDecisionInfo {
     pub decision_mode: u8,
     pub chosen_idx: u32,
     pub candidate_count: u32,
+    pub primary_compare_idx: i32,
+    pub primary_compare_basis: u8,
+    pub best_value_alt_idx: i32,
+    pub best_survival_alt_idx: i32,
+    pub best_spike_alt_idx: i32,
+    pub margin_value_vs_primary: i32,
+    pub margin_spike_vs_primary: i32,
+    pub first_survival_pass: bool,
+    pub any_survival_pass: bool,
+    pub cot_eligible: bool,
 }
 
 #[repr(C)]
@@ -414,10 +446,45 @@ fn convert_plan_placement(
     CCPlanPlacement {
         piece: falling_piece.kind.0.into(),
         tspin: falling_piece.tspin.into(),
-        expected_x: expected_x,
-        expected_y: expected_y,
-        cleared_lines: cleared_lines,
+        expected_x,
+        expected_y,
+        cleared_lines,
+        placement_kind: convert_placement_kind(lock_result.placement_kind),
+        garbage_sent: lock_result.garbage_sent,
+        b2b: lock_result.b2b,
+        combo: lock_result.combo.map(|c| c as i32).unwrap_or(-1),
     }
+}
+
+fn convert_pv_step(
+    (falling_piece, lock_result): &(FallingPiece, LockResult),
+) -> CCPVStep {
+    let mut expected_x = [0; 4];
+    let mut expected_y = [0; 4];
+    for (i, &(x, y)) in falling_piece.cells().iter().enumerate() {
+        expected_x[i] = x as u8;
+        expected_y[i] = y as u8;
+    }
+    CCPVStep {
+        piece: falling_piece.kind.0.into(),
+        placement_kind: convert_placement_kind(lock_result.placement_kind),
+        lines_cleared: lock_result.cleared_lines.len() as u8,
+        garbage_sent: lock_result.garbage_sent,
+        b2b: lock_result.b2b,
+        combo: lock_result.combo.map(|c| c as i32).unwrap_or(-1),
+        expected_x,
+        expected_y,
+    }
+}
+
+fn convert_board_after(field: &[[bool; 10]; 40]) -> [u8; 220] {
+    let mut out = [0u8; 220];
+    for row in 0..22 {
+        for col in 0..10 {
+            out[row * 10 + col] = if field[row][col] { 1 } else { 0 };
+        }
+    }
+    out
 }
 
 fn convert_plan(
@@ -475,6 +542,14 @@ fn convert_candidates(
                     None => (false, unsafe { std::mem::zeroed() }),
                 };
 
+                let board_after = convert_board_after(&cand.board_after);
+
+                let pv_len = cand.pv.len().min(CC_MAX_PV_STEPS) as u8;
+                let mut pv_steps: [CCPVStep; CC_MAX_PV_STEPS] = unsafe { std::mem::zeroed() };
+                for (pi, step) in cand.pv.iter().take(CC_MAX_PV_STEPS).enumerate() {
+                    pv_steps[pi] = convert_pv_step(step);
+                }
+
                 candidates_out[i] = MaybeUninit::new(CCCandidate {
                     piece: cand.move_piece.kind.0.into(),
                     expected_x,
@@ -492,6 +567,9 @@ fn convert_candidates(
                     garbage_sent: cand.garbage_sent,
                     cleared_lines: to_cleared_lines(&cand.cleared_lines),
                     survival_pass: cand.survival_pass,
+                    board_after,
+                    pv_len,
+                    pv_steps,
                 });
             }
             *candidates_length = n as u32;
@@ -548,7 +626,7 @@ fn convert_decision_info(
         return;
     }
 
-    let (chosen_idx, candidate_count) = match info {
+    let (chosen_idx, candidate_count, meta, first_sp, any_sp) = match info {
         cold_clear::Info::Normal(ninfo) => {
             let mut found = 0;
             for (idx, candidate) in ninfo.candidates.iter().enumerate() {
@@ -559,9 +637,12 @@ fn convert_decision_info(
                     break;
                 }
             }
-            (found, ninfo.candidates.len() as u32)
+            (found, ninfo.candidates.len() as u32,
+             Some(&ninfo.compare_metadata),
+             ninfo.first_survival_pass,
+             ninfo.any_survival_pass)
         }
-        _ => (0, 0),
+        _ => (0, 0, None, false, false),
     };
 
     unsafe {
@@ -569,6 +650,16 @@ fn convert_decision_info(
             decision_mode: convert_decision_mode(info),
             chosen_idx,
             candidate_count,
+            primary_compare_idx: meta.and_then(|m| m.primary_compare_idx).map(|i| i as i32).unwrap_or(-1),
+            primary_compare_basis: meta.map(|m| m.primary_compare_basis).unwrap_or(0),
+            best_value_alt_idx: meta.and_then(|m| m.best_value_alt_idx).map(|i| i as i32).unwrap_or(-1),
+            best_survival_alt_idx: meta.and_then(|m| m.best_survival_alt_idx).map(|i| i as i32).unwrap_or(-1),
+            best_spike_alt_idx: meta.and_then(|m| m.best_spike_alt_idx).map(|i| i as i32).unwrap_or(-1),
+            margin_value_vs_primary: meta.and_then(|m| m.margin_value_vs_primary).unwrap_or(0),
+            margin_spike_vs_primary: meta.and_then(|m| m.margin_spike_vs_primary).unwrap_or(0),
+            first_survival_pass: first_sp,
+            any_survival_pass: any_sp,
+            cot_eligible: meta.map(|m| m.cot_eligible).unwrap_or(false),
         });
     }
 }

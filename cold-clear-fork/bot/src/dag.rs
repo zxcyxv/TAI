@@ -615,6 +615,69 @@ impl<E: Evaluation<R> + 'static, R: Clone + 'static, T: Clone + Default + 'stati
         plan
     }
 
+    /// Get the principal variation (best continuation) starting from a specific root child.
+    /// `root_child_rank` is the index into the root's children list (generation 0).
+    /// `horizon` limits how many steps deep to follow.
+    pub fn get_candidate_pv(
+        &self,
+        root_child_rank: usize,
+        horizon: usize,
+    ) -> Vec<(FallingPiece, LockResult)> {
+        if self.generations.is_empty() || horizon == 0 {
+            return vec![];
+        }
+
+        // Get the starting child node from generation 0
+        let start_node = self.generations[0].with_data(|gen| match &gen.children {
+            Children::Known(_, c) => c[self.root as usize]
+                .as_ref()
+                .and_then(|children| children.get(root_child_rank))
+                .map(|child| child.node),
+            _ => None,
+        });
+
+        let mut node = match start_node {
+            Some(n) => n,
+            None => return vec![],
+        };
+
+        let mut pv = vec![];
+        let mut board = self.board.clone();
+
+        // Advance board past the root child placement (generation 0 → 1)
+        self.generations[0].with_data(|gen| {
+            if let Children::Known(_, c) = &gen.children {
+                if let Some(children) = &c[self.root as usize] {
+                    if let Some(child) = children.get(root_child_rank) {
+                        advance(&mut board, child.placement);
+                    }
+                }
+            }
+        });
+
+        // Now follow best children from generation 1 onwards
+        for gen in self.generations.iter().skip(1) {
+            if pv.len() >= horizon {
+                break;
+            }
+            let done = gen.with_data(|gen| match &gen.children {
+                Children::Known(_, c) => match c[node as usize].as_ref().and_then(|c| c.first()) {
+                    Some(child) => {
+                        pv.push((child.placement, advance(&mut board, child.placement)));
+                        node = child.node;
+                        false
+                    }
+                    None => true,
+                },
+                _ => true,
+            });
+            if done {
+                break;
+            }
+        }
+        pv
+    }
+
     pub fn reset(&mut self, field: [[bool; 10]; 40], b2b: bool, combo: u32) -> Option<i32> {
         let garbage_lines;
         if b2b == self.board.b2b_bonus && combo == self.board.combo {

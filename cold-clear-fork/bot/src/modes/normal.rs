@@ -152,7 +152,7 @@ impl<E: Evaluator> BotState<E> {
         let mut candidate_infos = Vec::new();
         let mut first_survival_pass = false;
         let mut any_survival_pass = false;
-        for mv in &candidates {
+        for (ci, mv) in candidates.iter().enumerate() {
             let survival_pass = incoming == 0
                 || mv.board.column_heights()[3..6]
                     .iter()
@@ -161,6 +161,9 @@ impl<E: Evaluator> BotState<E> {
                 first_survival_pass = survival_pass;
             }
             any_survival_pass |= survival_pass;
+
+            let board_after = mv.board.get_field();
+            let pv = self.tree.get_candidate_pv(mv.original_rank as usize, 5);
 
             candidate_infos.push(CandidateInfo {
                 move_piece: mv.mv,
@@ -176,6 +179,8 @@ impl<E: Evaluator> BotState<E> {
                 garbage_sent: mv.lock.garbage_sent,
                 cleared_lines: mv.lock.cleared_lines.clone(),
                 survival_pass,
+                board_after,
+                pv,
             });
         }
 
@@ -188,6 +193,13 @@ impl<E: Evaluator> BotState<E> {
         } else {
             DecisionMode::SpikeBackup
         };
+
+        // Compute comparison metadata
+        let compare_metadata = Self::compute_compare_metadata(
+            &candidate_infos,
+            &decision_mode,
+            &child,
+        );
 
         let info = if book_move.is_some() {
             crate::Info::Book
@@ -207,6 +219,9 @@ impl<E: Evaluator> BotState<E> {
                 decision_mode,
                 plan,
                 candidates: candidate_infos,
+                first_survival_pass,
+                any_survival_pass,
+                compare_metadata,
             })
         };
 
@@ -229,6 +244,126 @@ impl<E: Evaluator> BotState<E> {
         };
 
         return Some((mv, info));
+    }
+
+    fn compute_compare_metadata<V, T>(
+        candidate_infos: &[CandidateInfo],
+        decision_mode: &DecisionMode,
+        chosen: &crate::dag::MoveCandidate<V, T>,
+    ) -> CompareMetadata {
+        if candidate_infos.is_empty() {
+            return CompareMetadata {
+                primary_compare_idx: None,
+                primary_compare_basis: 0,
+                best_value_alt_idx: None,
+                best_survival_alt_idx: None,
+                best_spike_alt_idx: None,
+                margin_value_vs_primary: None,
+                margin_spike_vs_primary: None,
+                cot_eligible: false,
+            };
+        }
+
+        // Find chosen index
+        let chosen_idx = candidate_infos.iter().position(|c| {
+            c.hold == chosen.hold && c.move_piece.same_location(&chosen.mv)
+        }).unwrap_or(0);
+
+        let chosen_info = &candidate_infos[chosen_idx];
+
+        // Helper: first distinct non-chosen by rank order
+        let first_other_by_rank = candidate_infos.iter().enumerate()
+            .find(|(i, _)| *i != chosen_idx)
+            .map(|(i, _)| i as u32);
+
+        // Helper: first distinct surviving non-chosen
+        let first_surviving_other = candidate_infos.iter().enumerate()
+            .find(|(i, c)| *i != chosen_idx && c.survival_pass)
+            .map(|(i, _)| i as u32);
+
+        // Helper: highest spike non-chosen
+        let best_spike_alt = candidate_infos.iter().enumerate()
+            .filter(|(i, _)| *i != chosen_idx)
+            .max_by_key(|(_, c)| c.spike_score)
+            .map(|(i, _)| i as u32);
+
+        match decision_mode {
+            DecisionMode::Book => CompareMetadata {
+                primary_compare_idx: None,
+                primary_compare_basis: 4, // BOOK
+                best_value_alt_idx: None,
+                best_survival_alt_idx: None,
+                best_spike_alt_idx: None,
+                margin_value_vs_primary: None,
+                margin_spike_vs_primary: None,
+                cot_eligible: false,
+            },
+            DecisionMode::Normal => {
+                let primary = first_other_by_rank;
+                let (margin_val, margin_spike) = primary.map(|idx| {
+                    let p = &candidate_infos[idx as usize];
+                    (
+                        Some(chosen_info.eval_score - p.eval_score),
+                        Some(chosen_info.spike_score - p.spike_score),
+                    )
+                }).unwrap_or((None, None));
+                CompareMetadata {
+                    primary_compare_idx: primary,
+                    primary_compare_basis: if primary.is_some() { 1 } else { 0 }, // BEST_OTHER_BY_RANK
+                    best_value_alt_idx: first_other_by_rank,
+                    best_survival_alt_idx: first_surviving_other,
+                    best_spike_alt_idx: best_spike_alt,
+                    margin_value_vs_primary: margin_val,
+                    margin_spike_vs_primary: margin_spike,
+                    cot_eligible: primary.is_some(),
+                }
+            },
+            DecisionMode::SurviveFilter => {
+                // Primary is the first candidate before chosen that failed survival
+                let primary = candidate_infos.iter().enumerate()
+                    .take(chosen_idx)
+                    .find(|(_, c)| !c.survival_pass)
+                    .map(|(i, _)| i as u32);
+                let (margin_val, margin_spike) = primary.map(|idx| {
+                    let p = &candidate_infos[idx as usize];
+                    (
+                        Some(chosen_info.eval_score - p.eval_score),
+                        Some(chosen_info.spike_score - p.spike_score),
+                    )
+                }).unwrap_or((None, None));
+                CompareMetadata {
+                    primary_compare_idx: primary,
+                    primary_compare_basis: 2, // BEST_FILTERED_OUT_BY_SURVIVAL
+                    best_value_alt_idx: first_other_by_rank,
+                    best_survival_alt_idx: first_surviving_other,
+                    best_spike_alt_idx: best_spike_alt,
+                    margin_value_vs_primary: margin_val,
+                    margin_spike_vs_primary: margin_spike,
+                    cot_eligible: true,
+                }
+            },
+            DecisionMode::SpikeBackup => {
+                // Primary is second-best spike
+                let primary = best_spike_alt;
+                let (margin_val, margin_spike) = primary.map(|idx| {
+                    let p = &candidate_infos[idx as usize];
+                    (
+                        Some(chosen_info.eval_score - p.eval_score),
+                        Some(chosen_info.spike_score - p.spike_score),
+                    )
+                }).unwrap_or((None, None));
+                CompareMetadata {
+                    primary_compare_idx: primary,
+                    primary_compare_basis: 3, // SECOND_BEST_SPIKE
+                    best_value_alt_idx: first_other_by_rank,
+                    best_survival_alt_idx: None, // none survive
+                    best_spike_alt_idx: primary,
+                    margin_value_vs_primary: margin_val,
+                    margin_spike_vs_primary: margin_spike,
+                    cot_eligible: primary.is_some(),
+                }
+            },
+        }
     }
 
     pub fn advance_move(&mut self, mv: FallingPiece) {
@@ -370,6 +505,27 @@ pub struct CandidateInfo {
     pub garbage_sent: u32,
     pub cleared_lines: ArrayVec<[i32; 4]>,
     pub survival_pass: bool,
+    #[serde(skip, default = "default_board_field")]
+    pub board_after: [[bool; 10]; 40],
+    #[serde(skip)]
+    pub pv: Vec<(FallingPiece, LockResult)>,
+}
+
+fn default_board_field() -> [[bool; 10]; 40] {
+    [[false; 10]; 40]
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+pub struct CompareMetadata {
+    pub primary_compare_idx: Option<u32>,
+    /// 0=NONE, 1=BEST_OTHER_BY_RANK, 2=BEST_FILTERED_OUT_BY_SURVIVAL, 3=SECOND_BEST_SPIKE, 4=BOOK
+    pub primary_compare_basis: u8,
+    pub best_value_alt_idx: Option<u32>,
+    pub best_survival_alt_idx: Option<u32>,
+    pub best_spike_alt_idx: Option<u32>,
+    pub margin_value_vs_primary: Option<i32>,
+    pub margin_spike_vs_primary: Option<i32>,
+    pub cot_eligible: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
@@ -380,4 +536,7 @@ pub struct Info {
     pub decision_mode: DecisionMode,
     pub plan: Vec<(FallingPiece, LockResult)>,
     pub candidates: Vec<CandidateInfo>,
+    pub first_survival_pass: bool,
+    pub any_survival_pass: bool,
+    pub compare_metadata: CompareMetadata,
 }

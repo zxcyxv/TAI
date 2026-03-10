@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 
+[System.Obsolete("Use DecisionPacket instead. This class is retained for backwards compatibility only.")]
 public class BoardData
 {
     bool canHold;

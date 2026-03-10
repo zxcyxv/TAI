@@ -73,6 +73,33 @@ public static class ColdClearNative
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    public struct CCPlanPlacement
+    {
+        public CCPiece piece;
+        public int tspin;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_x;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_y;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public int[] cleared_lines;
+        public byte placement_kind;
+        public uint garbage_sent;
+        [MarshalAs(UnmanagedType.I1)] public bool b2b;
+        public int combo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CCPVStep
+    {
+        public CCPiece piece;
+        public byte placement_kind;
+        public byte lines_cleared;
+        public uint garbage_sent;
+        [MarshalAs(UnmanagedType.I1)] public bool b2b;
+        public int combo;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_x;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     public struct CCEvalTrace
     {
         public int clear_score;
@@ -110,6 +137,9 @@ public static class ColdClearNative
         public uint garbage_sent;
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public int[] cleared_lines;
         [MarshalAs(UnmanagedType.I1)] public bool survival_pass;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 220)] public byte[] board_after;
+        public byte pv_len;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 5)] public CCPVStep[] pv_steps;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -118,6 +148,16 @@ public static class ColdClearNative
         public byte decision_mode;
         public uint chosen_idx;
         public uint candidate_count;
+        public int primary_compare_idx;
+        public byte primary_compare_basis;
+        public int best_value_alt_idx;
+        public int best_survival_alt_idx;
+        public int best_spike_alt_idx;
+        public int margin_value_vs_primary;
+        public int margin_spike_vs_primary;
+        [MarshalAs(UnmanagedType.I1)] public bool first_survival_pass;
+        [MarshalAs(UnmanagedType.I1)] public bool any_survival_pass;
+        [MarshalAs(UnmanagedType.I1)] public bool cot_eligible;
     }
 
     // defaults

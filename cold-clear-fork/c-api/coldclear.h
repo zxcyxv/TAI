@@ -56,7 +56,23 @@ typedef struct CCPlanPlacement {
 
     /* Expected lines that will be cleared after placement, with -1 indicating no line */
     int32_t cleared_lines[4];
+
+    uint8_t placement_kind;
+    uint32_t garbage_sent;
+    bool b2b;
+    int32_t combo;  /* -1 = None */
 } CCPlanPlacement;
+
+typedef struct CCPVStep {
+    CCPiece piece;
+    uint8_t placement_kind;
+    uint8_t lines_cleared;
+    uint32_t garbage_sent;
+    bool b2b;
+    int32_t combo;  /* -1 = None */
+    uint8_t expected_x[4];
+    uint8_t expected_y[4];
+} CCPVStep;
 
 typedef struct CCMove {
     /* Whether hold is required */
@@ -109,12 +125,27 @@ typedef struct CCCandidate {
     uint32_t garbage_sent;
     int32_t cleared_lines[4];
     bool survival_pass;
+
+    /* Board state after this candidate's placement, row-major [22 rows][10 cols] */
+    uint8_t board_after[220];
+    uint8_t pv_len;
+    CCPVStep pv_steps[5];
 } CCCandidate;
 
 typedef struct CCDecisionInfo {
     uint8_t decision_mode;
     uint32_t chosen_idx;
     uint32_t candidate_count;
+    int32_t primary_compare_idx;       /* -1 = None */
+    uint8_t primary_compare_basis;     /* 0=NONE, 1=BEST_OTHER_BY_RANK, 2=BEST_FILTERED_OUT_BY_SURVIVAL, 3=SECOND_BEST_SPIKE, 4=BOOK */
+    int32_t best_value_alt_idx;        /* -1 = None */
+    int32_t best_survival_alt_idx;     /* -1 = None */
+    int32_t best_spike_alt_idx;        /* -1 = None */
+    int32_t margin_value_vs_primary;   /* 0 if no primary */
+    int32_t margin_spike_vs_primary;   /* 0 if no primary */
+    bool first_survival_pass;
+    bool any_survival_pass;
+    bool cot_eligible;
 } CCDecisionInfo;
 
 typedef struct CCOptions {

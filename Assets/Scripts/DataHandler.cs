@@ -105,26 +105,51 @@ public class DataHandler : MonoBehaviour
     public void AttachDecision(
         List<CandidateData> candidates,
         ColdClearNative.CCDecisionInfo decisionInfo,
-        ColdClearNative.CCMove move)
+        ColdClearNative.CCMove move,
+        List<PlanStepData> chosenPlan = null)
     {
         if (pendingStep == null)
         {
             return;
         }
 
+        // Search metadata
         pendingStep.nodes = move.nodes;
         pendingStep.depth = move.depth;
-        pendingStep.decisionMode = decisionInfo.decision_mode;
+        pendingStep.decisionMode = DecisionPacket.DecisionModeToString(decisionInfo.decision_mode);
         pendingStep.chosenIdx = (int)decisionInfo.chosen_idx;
+
+        // Comparison metadata
+        pendingStep.primaryCompareIdx = decisionInfo.primary_compare_idx >= 0 ? (int?)decisionInfo.primary_compare_idx : null;
+        pendingStep.primaryCompareBasis = DecisionPacket.CompareBasisToString(decisionInfo.primary_compare_basis);
+        pendingStep.bestValueAltIdx = decisionInfo.best_value_alt_idx >= 0 ? (int?)decisionInfo.best_value_alt_idx : null;
+        pendingStep.bestSurvivalAltIdx = decisionInfo.best_survival_alt_idx >= 0 ? (int?)decisionInfo.best_survival_alt_idx : null;
+        pendingStep.bestSpikeAltIdx = decisionInfo.best_spike_alt_idx >= 0 ? (int?)decisionInfo.best_spike_alt_idx : null;
+        pendingStep.marginValueVsPrimary = decisionInfo.primary_compare_idx >= 0 ? (int?)decisionInfo.margin_value_vs_primary : null;
+        pendingStep.marginSpikeVsPrimary = decisionInfo.primary_compare_idx >= 0 ? (int?)decisionInfo.margin_spike_vs_primary : null;
+        pendingStep.firstSurvivalPass = decisionInfo.first_survival_pass;
+        pendingStep.anySurvivalPass = decisionInfo.any_survival_pass;
+        pendingStep.cotEligible = decisionInfo.cot_eligible;
+
+        // Incoming garbage
+        pendingStep.incoming = ColdClearAgent.Instance != null ? ColdClearAgent.Instance.IncomingGarbage : 0;
+
+        // Candidates
         pendingStep.candidates = candidates ?? new List<CandidateData>();
+
+        // Chosen action
         pendingStep.actionHold = move.hold;
-        pendingStep.actionX = DecisionPacket.CopyBytes(move.expected_x);
-        pendingStep.actionY = DecisionPacket.CopyBytes(move.expected_y);
-        pendingStep.actionToken = PlacementToken.FromNative(
+        pendingStep.cellsX = DecisionPacket.CopyBytes(move.expected_x);
+        pendingStep.cellsY = DecisionPacket.CopyBytes(move.expected_y);
+        pendingStep.placementToken = PlacementToken.FromNative(
             move.hold,
             pendingStep.currentPiece,
             move.expected_x,
             move.expected_y);
+        pendingStep.actionToken = pendingStep.placementToken;
+
+        // Chosen plan
+        pendingStep.chosenPlan = chosenPlan ?? new List<PlanStepData>();
 
         currentGameSteps.Add(pendingStep);
         currentStepCount = currentGameSteps.Count;

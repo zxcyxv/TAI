@@ -15,6 +15,9 @@ public class ColdClearAgent : MonoBehaviour
     [SerializeField] private bool verboseLogging;
 
     private const int MaxCandidates = 10;
+    private const int MaxPlanSteps = 32;
+
+    public uint IncomingGarbage => incomingGarbage;
 
     private readonly List<ControlCommand> commandBuffer = new List<ControlCommand>(40);
     private IntPtr bot = IntPtr.Zero;
@@ -311,14 +314,20 @@ public class ColdClearAgent : MonoBehaviour
         int candidateSize = Marshal.SizeOf<ColdClearNative.CCCandidate>();
         IntPtr candidatePtr = Marshal.AllocHGlobal(candidateSize * MaxCandidates);
 
+        int planSize = Marshal.SizeOf<ColdClearNative.CCPlanPlacement>();
+        IntPtr planPtr = Marshal.AllocHGlobal(planSize * MaxPlanSteps);
+        IntPtr planLenPtr = Marshal.AllocHGlobal(sizeof(uint));
+
         try
         {
+            Marshal.WriteInt32(planLenPtr, MaxPlanSteps);
+
             uint candidateCount = MaxCandidates;
             ColdClearNative.CCBotPollStatus status = ColdClearNative.cc_poll_next_move(
                 bot,
                 ref move,
-                IntPtr.Zero,
-                IntPtr.Zero,
+                planPtr,
+                planLenPtr,
                 candidatePtr,
                 ref candidateCount,
                 ref decisionInfo);
@@ -337,6 +346,7 @@ public class ColdClearAgent : MonoBehaviour
                 return;
             }
 
+            // Marshal candidates
             List<CandidateData> candidates = new List<CandidateData>((int)candidateCount);
             for (int i = 0; i < candidateCount; i++)
             {
@@ -346,7 +356,16 @@ public class ColdClearAgent : MonoBehaviour
                 candidates.Add(CandidateData.FromNative(i, nativeCandidate));
             }
 
-            DataHandler.Instance?.AttachDecision(candidates, decisionInfo, move);
+            // Marshal chosen plan
+            uint planLength = (uint)Marshal.ReadInt32(planLenPtr);
+            List<PlanStepData> chosenPlan = new List<PlanStepData>((int)planLength);
+            for (int i = 0; i < planLength; i++)
+            {
+                var step = Marshal.PtrToStructure<ColdClearNative.CCPlanPlacement>(planPtr + i * planSize);
+                chosenPlan.Add(PlanStepData.FromPlanPlacement(step));
+            }
+
+            DataHandler.Instance?.AttachDecision(candidates, decisionInfo, move, chosenPlan);
 
             if (!ColdClearAdapter.TryBuildCommandSequence(move, commandBuffer))
             {
@@ -362,6 +381,8 @@ public class ColdClearAgent : MonoBehaviour
         finally
         {
             Marshal.FreeHGlobal(candidatePtr);
+            Marshal.FreeHGlobal(planPtr);
+            Marshal.FreeHGlobal(planLenPtr);
         }
     }
 
