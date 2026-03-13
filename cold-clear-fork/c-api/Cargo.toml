@@ -14,3 +14,5 @@ crate-type = ["cdylib", "staticlib"]
 cold-clear = { path = "../bot" }
 libtetris = { path = "../libtetris" }
 enumset = "1.0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

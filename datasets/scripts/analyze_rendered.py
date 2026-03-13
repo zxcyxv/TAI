@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Legacy rendered-CoT analyzer for the older Unity-assembled packet format."""
 import argparse
 import json
 from collections import Counter, defaultdict

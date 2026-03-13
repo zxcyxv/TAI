@@ -72,94 +72,6 @@ public static class ColdClearNative
         };
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct CCPlanPlacement
-    {
-        public CCPiece piece;
-        public int tspin;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_x;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_y;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public int[] cleared_lines;
-        public byte placement_kind;
-        public uint garbage_sent;
-        [MarshalAs(UnmanagedType.I1)] public bool b2b;
-        public int combo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct CCPVStep
-    {
-        public CCPiece piece;
-        public byte placement_kind;
-        public byte lines_cleared;
-        public uint garbage_sent;
-        [MarshalAs(UnmanagedType.I1)] public bool b2b;
-        public int combo;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_x;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct CCEvalTrace
-    {
-        public int clear_score;
-        public int tspin_score;
-        public int pc_score;
-        public int b2b_score;
-        public int combo_score;
-        public int wasted_t;
-        public int height_penalty;
-        public int jeopardy_penalty;
-        public int well_score;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public int[] tslot_score;
-        public int bumpiness_penalty;
-        public int hole_penalty;
-        public int covered_penalty;
-        public int row_transitions;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct CCCandidate
-    {
-        public CCPiece piece;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_x;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public byte[] expected_y;
-        [MarshalAs(UnmanagedType.I1)] public bool hold;
-        public int eval_score;
-        [MarshalAs(UnmanagedType.I1)] public bool has_trace;
-        public CCEvalTrace trace;
-        public int spike_score;
-        public uint original_rank;
-        public byte placement_kind;
-        [MarshalAs(UnmanagedType.I1)] public bool b2b;
-        [MarshalAs(UnmanagedType.I1)] public bool perfect_clear;
-        public int combo;
-        public uint garbage_sent;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public int[] cleared_lines;
-        [MarshalAs(UnmanagedType.I1)] public bool survival_pass;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 220)] public byte[] board_after;
-        public byte pv_len;
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 5)] public CCPVStep[] pv_steps;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct CCDecisionInfo
-    {
-        public byte decision_mode;
-        public uint chosen_idx;
-        public uint candidate_count;
-        public int primary_compare_idx;
-        public byte primary_compare_basis;
-        public int best_value_alt_idx;
-        public int best_survival_alt_idx;
-        public int best_spike_alt_idx;
-        public int margin_value_vs_primary;
-        public int margin_spike_vs_primary;
-        [MarshalAs(UnmanagedType.I1)] public bool first_survival_pass;
-        [MarshalAs(UnmanagedType.I1)] public bool any_survival_pass;
-        [MarshalAs(UnmanagedType.I1)] public bool cot_eligible;
-    }
-
     // defaults
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     public static extern void cc_default_options(out CCOptions options);
@@ -186,23 +98,18 @@ public static class ColdClearNative
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     public static extern void cc_add_next_piece_async(IntPtr bot, CCPiece piece);
 
+    // Simplified: only returns CCMove, no plan/candidates/decision_info
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
-    public static extern CCBotPollStatus cc_poll_next_move(
-        IntPtr bot,
-        ref CCMove move,
-        IntPtr plan,
-        IntPtr plan_length,
-        IntPtr candidates,
-        ref uint candidate_count,
-        ref CCDecisionInfo decisionInfo);
+    public static extern CCBotPollStatus cc_poll_next_move(IntPtr bot, ref CCMove move);
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
-    public static extern CCBotPollStatus cc_block_next_move(
-        IntPtr bot,
-        ref CCMove move,
-        IntPtr plan,
-        IntPtr plan_length,
-        IntPtr candidates,
-        ref uint candidate_count,
-        ref CCDecisionInfo decisionInfo);
+    public static extern CCBotPollStatus cc_block_next_move(IntPtr bot, ref CCMove move);
+
+    // JSON decision packet API (cot_raw_v3)
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint cc_last_decision_json_len(IntPtr bot);
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool cc_copy_last_decision_json(IntPtr bot, byte[] dst, uint capacity);
 }

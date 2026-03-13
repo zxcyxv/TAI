@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using UnityEngine;
 
 public class ColdClearAgent : MonoBehaviour
@@ -14,9 +15,6 @@ public class ColdClearAgent : MonoBehaviour
     [SerializeField] private uint incomingGarbage;
     [SerializeField] private bool verboseLogging;
 
-    private const int MaxCandidates = 10;
-    private const int MaxPlanSteps = 32;
-
     public uint IncomingGarbage => incomingGarbage;
 
     private readonly List<ControlCommand> commandBuffer = new List<ControlCommand>(40);
@@ -24,6 +22,7 @@ public class ColdClearAgent : MonoBehaviour
     private Board subscribedBoard;
     private bool waitingForMove;
     private bool hasLoggedMissingRefs;
+    private bool bookEnabled;
 
     // singleton
     public static ColdClearAgent Instance;
@@ -175,7 +174,6 @@ public class ColdClearAgent : MonoBehaviour
             return;
         }
 
-        // Hold 처리로 인한 스폰은 같은 턴이므로 새 요청을 보내지 않는다.
         if (board != null && !board.CanHold)
         {
             return;
@@ -246,6 +244,12 @@ public class ColdClearAgent : MonoBehaviour
         ColdClearNative.cc_default_options(out ColdClearNative.CCOptions options);
         ColdClearNative.cc_default_weights(out ColdClearNative.CCWeights weights);
         EnsureWeightsLayout(ref weights);
+        bookEnabled = false;
+
+        DataHandler.Instance?.ConfigureCollectorMeta(
+            ComputeWeightsHash(weights),
+            ComputeOptionsHash(options),
+            bookEnabled);
 
         bot = ColdClearNative.cc_launch_async(
             ref options,
@@ -296,6 +300,91 @@ public class ColdClearAgent : MonoBehaviour
         }
     }
 
+    private static string ComputeOptionsHash(ColdClearNative.CCOptions options)
+    {
+        string payload = string.Join("|",
+            options.mode,
+            options.spawn_rule,
+            options.pcloop,
+            options.min_nodes,
+            options.max_nodes,
+            options.threads,
+            options.use_hold ? 1 : 0,
+            options.speculate ? 1 : 0);
+        return ComputeSha256Hex(payload);
+    }
+
+    private static string ComputeWeightsHash(ColdClearNative.CCWeights weights)
+    {
+        StringBuilder sb = new StringBuilder(512);
+        sb.Append(weights.back_to_back).Append('|')
+            .Append(weights.bumpiness).Append('|')
+            .Append(weights.bumpiness_sq).Append('|')
+            .Append(weights.row_transitions).Append('|')
+            .Append(weights.height).Append('|')
+            .Append(weights.top_half).Append('|')
+            .Append(weights.top_quarter).Append('|')
+            .Append(weights.jeopardy).Append('|')
+            .Append(weights.cavity_cells).Append('|')
+            .Append(weights.cavity_cells_sq).Append('|')
+            .Append(weights.overhang_cells).Append('|')
+            .Append(weights.overhang_cells_sq).Append('|')
+            .Append(weights.covered_cells).Append('|')
+            .Append(weights.covered_cells_sq).Append('|');
+        AppendArray(sb, weights.tslot);
+        sb.Append('|').Append(weights.well_depth).Append('|').Append(weights.max_well_depth).Append('|');
+        AppendArray(sb, weights.well_column);
+        sb.Append('|').Append(weights.b2b_clear).Append('|')
+            .Append(weights.clear1).Append('|')
+            .Append(weights.clear2).Append('|')
+            .Append(weights.clear3).Append('|')
+            .Append(weights.clear4).Append('|')
+            .Append(weights.tspin1).Append('|')
+            .Append(weights.tspin2).Append('|')
+            .Append(weights.tspin3).Append('|')
+            .Append(weights.mini_tspin1).Append('|')
+            .Append(weights.mini_tspin2).Append('|')
+            .Append(weights.perfect_clear).Append('|')
+            .Append(weights.combo_garbage).Append('|')
+            .Append(weights.move_time).Append('|')
+            .Append(weights.wasted_t).Append('|')
+            .Append(weights.use_bag ? 1 : 0).Append('|')
+            .Append(weights.timed_jeopardy ? 1 : 0).Append('|')
+            .Append(weights.stack_pc_damage ? 1 : 0);
+        return ComputeSha256Hex(sb.ToString());
+    }
+
+    private static void AppendArray(StringBuilder sb, int[] values)
+    {
+        if (values == null)
+        {
+            sb.Append("null");
+            return;
+        }
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append(',');
+            }
+            sb.Append(values[i]);
+        }
+    }
+
+    private static string ComputeSha256Hex(string value)
+    {
+        using SHA256 sha = SHA256.Create();
+        byte[] bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
+        byte[] hash = sha.ComputeHash(bytes);
+        StringBuilder sb = new StringBuilder(hash.Length * 2);
+        for (int i = 0; i < hash.Length; i++)
+        {
+            sb.Append(hash[i].ToString("x2"));
+        }
+        return sb.ToString();
+    }
+
     private void RequestNextMove()
     {
         if (bot == IntPtr.Zero || waitingForMove)
@@ -310,79 +399,44 @@ public class ColdClearAgent : MonoBehaviour
     private void PollNextMove()
     {
         ColdClearNative.CCMove move = ColdClearNative.CCMove.CreateBuffer();
-        ColdClearNative.CCDecisionInfo decisionInfo = default;
-        int candidateSize = Marshal.SizeOf<ColdClearNative.CCCandidate>();
-        IntPtr candidatePtr = Marshal.AllocHGlobal(candidateSize * MaxCandidates);
 
-        int planSize = Marshal.SizeOf<ColdClearNative.CCPlanPlacement>();
-        IntPtr planPtr = Marshal.AllocHGlobal(planSize * MaxPlanSteps);
-        IntPtr planLenPtr = Marshal.AllocHGlobal(sizeof(uint));
+        ColdClearNative.CCBotPollStatus status = ColdClearNative.cc_poll_next_move(bot, ref move);
 
-        try
+        if (status == ColdClearNative.CCBotPollStatus.CC_WAITING)
         {
-            Marshal.WriteInt32(planLenPtr, MaxPlanSteps);
+            return;
+        }
 
-            uint candidateCount = MaxCandidates;
-            ColdClearNative.CCBotPollStatus status = ColdClearNative.cc_poll_next_move(
-                bot,
-                ref move,
-                planPtr,
-                planLenPtr,
-                candidatePtr,
-                ref candidateCount,
-                ref decisionInfo);
+        waitingForMove = false;
 
-            if (status == ColdClearNative.CCBotPollStatus.CC_WAITING)
+        if (status == ColdClearNative.CCBotPollStatus.CC_BOT_DEAD)
+        {
+            Debug.LogWarning("[ColdClearAgent] Bot died. Relaunching from current board state.");
+            RelaunchBot();
+            return;
+        }
+
+        // Copy decision JSON from Rust
+        uint jsonLen = ColdClearNative.cc_last_decision_json_len(bot);
+        if (jsonLen > 0)
+        {
+            byte[] buf = new byte[jsonLen];
+            if (ColdClearNative.cc_copy_last_decision_json(bot, buf, jsonLen))
             {
-                return;
-            }
-
-            waitingForMove = false;
-
-            if (status == ColdClearNative.CCBotPollStatus.CC_BOT_DEAD)
-            {
-                Debug.LogWarning("[ColdClearAgent] Bot died. Relaunching from current board state.");
-                RelaunchBot();
-                return;
-            }
-
-            // Marshal candidates
-            List<CandidateData> candidates = new List<CandidateData>((int)candidateCount);
-            for (int i = 0; i < candidateCount; i++)
-            {
-                IntPtr currentPtr = candidatePtr + (i * candidateSize);
-                ColdClearNative.CCCandidate nativeCandidate =
-                    Marshal.PtrToStructure<ColdClearNative.CCCandidate>(currentPtr);
-                candidates.Add(CandidateData.FromNative(i, nativeCandidate));
-            }
-
-            // Marshal chosen plan
-            uint planLength = (uint)Marshal.ReadInt32(planLenPtr);
-            List<PlanStepData> chosenPlan = new List<PlanStepData>((int)planLength);
-            for (int i = 0; i < planLength; i++)
-            {
-                var step = Marshal.PtrToStructure<ColdClearNative.CCPlanPlacement>(planPtr + i * planSize);
-                chosenPlan.Add(PlanStepData.FromPlanPlacement(step));
-            }
-
-            DataHandler.Instance?.AttachDecision(candidates, decisionInfo, move, chosenPlan);
-
-            if (!ColdClearAdapter.TryBuildCommandSequence(move, commandBuffer))
-            {
-                Debug.LogWarning("[ColdClearAgent] Cold Clear returned an empty or unsupported move.");
-                return;
-            }
-
-            for (int i = 0; i < commandBuffer.Count; i++)
-            {
-                commandManager.EnqueueCommand(commandBuffer[i]);
+                string engineJson = Encoding.UTF8.GetString(buf);
+                DataHandler.Instance?.AttachEngineJson(engineJson);
             }
         }
-        finally
+
+        if (!ColdClearAdapter.TryBuildCommandSequence(move, commandBuffer))
         {
-            Marshal.FreeHGlobal(candidatePtr);
-            Marshal.FreeHGlobal(planPtr);
-            Marshal.FreeHGlobal(planLenPtr);
+            Debug.LogWarning("[ColdClearAgent] Cold Clear returned an empty or unsupported move.");
+            return;
+        }
+
+        for (int i = 0; i < commandBuffer.Count; i++)
+        {
+            commandManager.EnqueueCommand(commandBuffer[i]);
         }
     }
 

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 mod dag;
 pub mod evaluation;
 pub mod modes;
+pub mod packet;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod desktop;

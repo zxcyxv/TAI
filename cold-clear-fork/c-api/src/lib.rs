@@ -1,18 +1,25 @@
 use std::ffi::CStr;
-use std::mem::MaybeUninit;
 use std::os::raw::c_char;
 use std::sync::Arc;
 
 use cold_clear::PcPriority;
 use enumset::EnumSet;
 use libtetris::{
-    Board, FallingPiece, LockResult, MovementMode, Piece, PieceMovement, PlacementKind, SpawnRule,
-    TspinStatus,
+    Board, MovementMode, Piece, PieceMovement, SpawnRule,
 };
 
-type CCAsyncBot = cold_clear::Interface;
+// ── Bot Wrapper ────────────────────────────────────────────────────
+
+struct CCBotWrapper {
+    interface: cold_clear::Interface,
+    last_decision_json: Option<String>,
+}
+
+type CCAsyncBot = CCBotWrapper;
 
 type CCBook = cold_clear::Book;
+
+// ── C Enum Macros ──────────────────────────────────────────────────
 
 macro_rules! cenum {
     (@match $v:ident $name:ident $($item:ident => $to:expr),*) => {
@@ -77,12 +84,6 @@ cenum! {
         CC_Z => Piece::Z
     }
 
-    enum CCTspinStatus => TspinStatus {
-        CC_NONE => TspinStatus::None,
-        CC_MINI => TspinStatus::Mini,
-        CC_FULL => TspinStatus::Full
-    }
-
     enum CCMovement => PieceMovement {
         CC_LEFT => PieceMovement::Left,
         CC_RIGHT => PieceMovement::Right,
@@ -109,6 +110,8 @@ cenum! {
     }
 }
 
+// ── C Structs (kept) ───────────────────────────────────────────────
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
 #[allow(non_camel_case_types)]
@@ -129,96 +132,6 @@ struct CCMove {
     nodes: u32,
     depth: u32,
     original_rank: u32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-struct CCPlanPlacement {
-    piece: CCPiece,
-    tspin: CCTspinStatus,
-    expected_x: [u8; 4],
-    expected_y: [u8; 4],
-    cleared_lines: [i32; 4],
-    placement_kind: u8,
-    garbage_sent: u32,
-    b2b: bool,
-    combo: i32,
-}
-
-const CC_MAX_PV_STEPS: usize = 5;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct CCPVStep {
-    pub piece: CCPiece,
-    pub placement_kind: u8,
-    pub lines_cleared: u8,
-    pub garbage_sent: u32,
-    pub b2b: bool,
-    pub combo: i32,
-    pub expected_x: [u8; 4],
-    pub expected_y: [u8; 4],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct CCEvalTrace {
-    pub clear_score: i32,
-    pub tspin_score: i32,
-    pub pc_score: i32,
-    pub b2b_score: i32,
-    pub combo_score: i32,
-    pub wasted_t: i32,
-    pub height_penalty: i32,
-    pub jeopardy_penalty: i32,
-    pub well_score: i32,
-    pub tslot_score: [i32; 4],
-    pub bumpiness_penalty: i32,
-    pub hole_penalty: i32,
-    pub covered_penalty: i32,
-    pub row_transitions: i32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct CCCandidate {
-    pub piece: CCPiece,
-    pub expected_x: [u8; 4],
-    pub expected_y: [u8; 4],
-    pub hold: bool,
-    pub eval_score: i32,
-    pub has_trace: bool,
-    pub trace: CCEvalTrace,
-    pub spike_score: i32,
-    pub original_rank: u32,
-    pub placement_kind: u8,
-    pub b2b: bool,
-    pub perfect_clear: bool,
-    pub combo: i32,
-    pub garbage_sent: u32,
-    pub cleared_lines: [i32; 4],
-    pub survival_pass: bool,
-    pub board_after: [u8; 220],
-    pub pv_len: u8,
-    pub pv_steps: [CCPVStep; CC_MAX_PV_STEPS],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct CCDecisionInfo {
-    pub decision_mode: u8,
-    pub chosen_idx: u32,
-    pub candidate_count: u32,
-    pub primary_compare_idx: i32,
-    pub primary_compare_basis: u8,
-    pub best_value_alt_idx: i32,
-    pub best_survival_alt_idx: i32,
-    pub best_spike_alt_idx: i32,
-    pub margin_value_vs_primary: i32,
-    pub margin_spike_vs_primary: i32,
-    pub first_survival_pass: bool,
-    pub any_survival_pass: bool,
-    pub cot_eligible: bool,
 }
 
 #[repr(C)]
@@ -273,6 +186,8 @@ struct CCWeights {
     timed_jeopardy: bool,
     stack_pc_damage: bool,
 }
+
+// ── Conversion helpers ─────────────────────────────────────────────
 
 fn convert_hold(hold: *mut CCPiece) -> Option<Piece> {
     if hold.is_null() {
@@ -338,6 +253,54 @@ fn convert_from_c_weights(weights: &CCWeights) -> cold_clear::evaluation::Standa
     }
 }
 
+fn convert_move(m: &libtetris::Move, info: &cold_clear::Info) -> CCMove {
+    let mut expected_x = [0; 4];
+    let mut expected_y = [0; 4];
+    for (i, &(x, y)) in m.expected_location.cells().iter().enumerate() {
+        expected_x[i] = x as u8;
+        expected_y[i] = y as u8;
+    }
+    let mut movements = [CCMovement::CC_DROP; 32];
+    for (i, &mv) in m.inputs.iter().enumerate() {
+        movements[i] = mv.into();
+    }
+    CCMove {
+        hold: m.hold,
+        expected_x,
+        expected_y,
+        movement_count: m.inputs.len() as u8,
+        movements,
+        nodes: match info {
+            cold_clear::Info::Normal(info) => info.nodes,
+            cold_clear::Info::PcLoop(_) => 0,
+            cold_clear::Info::Book => 0,
+        },
+        depth: match info {
+            cold_clear::Info::Normal(info) => info.depth,
+            cold_clear::Info::PcLoop(info) => info.depth as u32,
+            cold_clear::Info::Book => 0,
+        },
+        original_rank: match info {
+            cold_clear::Info::Normal(info) => info.original_rank,
+            cold_clear::Info::PcLoop(_) => 0,
+            cold_clear::Info::Book => 0,
+        },
+    }
+}
+
+fn build_and_store_json(bot: &mut CCBotWrapper, m: &libtetris::Move, info: &cold_clear::Info) {
+    match cold_clear::packet::build_v3_packet(m, info) {
+        Some(pkt) => {
+            bot.last_decision_json = Some(serde_json::to_string(&pkt).unwrap_or_default());
+        }
+        None => {
+            bot.last_decision_json = None;
+        }
+    }
+}
+
+// ── Bot lifecycle ──────────────────────────────────────────────────
+
 #[no_mangle]
 unsafe extern "C" fn cc_launch_with_board_async(
     options: &CCOptions,
@@ -367,12 +330,15 @@ unsafe extern "C" fn cc_launch_with_board_async(
         Arc::increment_strong_count(book);
         Some(Arc::from_raw(book))
     };
-    Box::into_raw(Box::new(cold_clear::Interface::launch(
-        board,
-        convert_from_c_options(options),
-        convert_from_c_weights(weights),
-        book,
-    )))
+    Box::into_raw(Box::new(CCBotWrapper {
+        interface: cold_clear::Interface::launch(
+            board,
+            convert_from_c_options(options),
+            convert_from_c_weights(weights),
+            book,
+        ),
+        last_decision_json: None,
+    }))
 }
 
 #[no_mangle]
@@ -393,18 +359,21 @@ unsafe extern "C" fn cc_launch_async(
         Arc::increment_strong_count(book);
         Some(Arc::from_raw(book))
     };
-    Box::into_raw(Box::new(cold_clear::Interface::launch(
-        board,
-        convert_from_c_options(options),
-        convert_from_c_weights(weights),
-        book,
-    )))
+    Box::into_raw(Box::new(CCBotWrapper {
+        interface: cold_clear::Interface::launch(
+            board,
+            convert_from_c_options(options),
+            convert_from_c_weights(weights),
+            book,
+        ),
+        last_decision_json: None,
+    }))
 }
 
 #[no_mangle]
 extern "C" fn cc_destroy_async(bot: *mut CCAsyncBot) {
     unsafe {
-        Box::from_raw(bot);
+        drop(Box::from_raw(bot));
     }
 }
 
@@ -415,307 +384,31 @@ extern "C" fn cc_reset_async(
     b2b: bool,
     combo: u32,
 ) {
-    bot.reset(*field, b2b, combo);
+    bot.interface.reset(*field, b2b, combo);
 }
 
 #[no_mangle]
 extern "C" fn cc_add_next_piece_async(bot: &mut CCAsyncBot, piece: CCPiece) {
-    bot.add_next_piece(piece.into());
+    bot.interface.add_next_piece(piece.into());
 }
 
 #[no_mangle]
 extern "C" fn cc_request_next_move(bot: &mut CCAsyncBot, incoming: u32) {
-    bot.suggest_next_move(incoming);
+    bot.interface.suggest_next_move(incoming);
 }
 
-fn convert_plan_placement(
-    (falling_piece, lock_result): &(FallingPiece, LockResult),
-) -> CCPlanPlacement {
-    let mut expected_x = [0; 4];
-    let mut expected_y = [0; 4];
-    for (i, &(x, y)) in falling_piece.cells().iter().enumerate() {
-        expected_x[i] = x as u8;
-        expected_y[i] = y as u8;
-    }
-
-    let mut cleared_lines = [-1; 4];
-    for (i, &cl) in lock_result.cleared_lines.iter().enumerate() {
-        cleared_lines[i] = cl;
-    }
-
-    CCPlanPlacement {
-        piece: falling_piece.kind.0.into(),
-        tspin: falling_piece.tspin.into(),
-        expected_x,
-        expected_y,
-        cleared_lines,
-        placement_kind: convert_placement_kind(lock_result.placement_kind),
-        garbage_sent: lock_result.garbage_sent,
-        b2b: lock_result.b2b,
-        combo: lock_result.combo.map(|c| c as i32).unwrap_or(-1),
-    }
-}
-
-fn convert_pv_step(
-    (falling_piece, lock_result): &(FallingPiece, LockResult),
-) -> CCPVStep {
-    let mut expected_x = [0; 4];
-    let mut expected_y = [0; 4];
-    for (i, &(x, y)) in falling_piece.cells().iter().enumerate() {
-        expected_x[i] = x as u8;
-        expected_y[i] = y as u8;
-    }
-    CCPVStep {
-        piece: falling_piece.kind.0.into(),
-        placement_kind: convert_placement_kind(lock_result.placement_kind),
-        lines_cleared: lock_result.cleared_lines.len() as u8,
-        garbage_sent: lock_result.garbage_sent,
-        b2b: lock_result.b2b,
-        combo: lock_result.combo.map(|c| c as i32).unwrap_or(-1),
-        expected_x,
-        expected_y,
-    }
-}
-
-fn convert_board_after(field: &[[bool; 10]; 40]) -> [u8; 220] {
-    let mut out = [0u8; 220];
-    for row in 0..22 {
-        for col in 0..10 {
-            out[row * 10 + col] = if field[row][col] { 1 } else { 0 };
-        }
-    }
-    out
-}
-
-fn convert_plan(
-    info: &cold_clear::Info,
-    plan: *mut MaybeUninit<CCPlanPlacement>,
-    plan_length: *mut u32,
-) {
-    if !plan.is_null() && !plan_length.is_null() {
-        let plan_length = unsafe { &mut *plan_length };
-        let plan = unsafe { std::slice::from_raw_parts_mut(plan, *plan_length as usize) };
-        let n = info.plan().len().min(plan.len());
-        for i in 0..n {
-            plan[i] = MaybeUninit::new(convert_plan_placement(&info.plan()[i]));
-        }
-        *plan_length = n as u32;
-    }
-}
-
-fn convert_candidates(
-    info: &cold_clear::Info,
-    candidates_out: *mut MaybeUninit<CCCandidate>,
-    candidates_length: *mut u32,
-) {
-    if !candidates_out.is_null() && !candidates_length.is_null() {
-        if let cold_clear::Info::Normal(ninfo) = info {
-            let candidates_length = unsafe { &mut *candidates_length };
-            let candidates_out = unsafe { std::slice::from_raw_parts_mut(candidates_out, *candidates_length as usize) };
-            let n = ninfo.candidates.len().min(candidates_out.len());
-            for i in 0..n {
-                let cand = &ninfo.candidates[i];
-                let mut expected_x = [0; 4];
-                let mut expected_y = [0; 4];
-                for (j, &(x, y)) in cand.move_piece.cells().iter().enumerate() {
-                    expected_x[j] = x as u8;
-                    expected_y[j] = y as u8;
-                }
-                
-                let (has_trace, trace) = match &cand.trace {
-                    Some(t) => (true, CCEvalTrace {
-                        clear_score: t.clear_score,
-                        tspin_score: t.tspin_score,
-                        pc_score: t.pc_score,
-                        b2b_score: t.b2b_score,
-                        combo_score: t.combo_score,
-                        wasted_t: t.wasted_t,
-                        height_penalty: t.height_penalty,
-                        jeopardy_penalty: t.jeopardy_penalty,
-                        well_score: t.well_score,
-                        tslot_score: t.tslot_score,
-                        bumpiness_penalty: t.bumpiness_penalty,
-                        hole_penalty: t.hole_penalty,
-                        covered_penalty: t.covered_penalty,
-                        row_transitions: t.row_transitions,
-                    }),
-                    None => (false, unsafe { std::mem::zeroed() }),
-                };
-
-                let board_after = convert_board_after(&cand.board_after);
-
-                let pv_len = cand.pv.len().min(CC_MAX_PV_STEPS) as u8;
-                let mut pv_steps: [CCPVStep; CC_MAX_PV_STEPS] = unsafe { std::mem::zeroed() };
-                for (pi, step) in cand.pv.iter().take(CC_MAX_PV_STEPS).enumerate() {
-                    pv_steps[pi] = convert_pv_step(step);
-                }
-
-                candidates_out[i] = MaybeUninit::new(CCCandidate {
-                    piece: cand.move_piece.kind.0.into(),
-                    expected_x,
-                    expected_y,
-                    hold: cand.hold,
-                    eval_score: cand.eval_score,
-                    has_trace,
-                    trace,
-                    spike_score: cand.spike_score,
-                    original_rank: cand.original_rank,
-                    placement_kind: convert_placement_kind(cand.placement_kind),
-                    b2b: cand.b2b,
-                    perfect_clear: cand.perfect_clear,
-                    combo: cand.combo.map(|combo| combo as i32).unwrap_or(-1),
-                    garbage_sent: cand.garbage_sent,
-                    cleared_lines: to_cleared_lines(&cand.cleared_lines),
-                    survival_pass: cand.survival_pass,
-                    board_after,
-                    pv_len,
-                    pv_steps,
-                });
-            }
-            *candidates_length = n as u32;
-        } else {
-            unsafe { *candidates_length = 0; }
-        }
-    }
-}
-
-fn convert_placement_kind(kind: PlacementKind) -> u8 {
-    match kind {
-        PlacementKind::None => 0,
-        PlacementKind::Clear1 => 1,
-        PlacementKind::Clear2 => 2,
-        PlacementKind::Clear3 => 3,
-        PlacementKind::Clear4 => 4,
-        PlacementKind::MiniTspin => 5,
-        PlacementKind::MiniTspin1 => 6,
-        PlacementKind::MiniTspin2 => 7,
-        PlacementKind::Tspin => 8,
-        PlacementKind::Tspin1 => 9,
-        PlacementKind::Tspin2 => 10,
-        PlacementKind::Tspin3 => 11,
-    }
-}
-
-fn to_cleared_lines(lines: &[i32]) -> [i32; 4] {
-    let mut out = [-1; 4];
-    for (i, line) in lines.iter().enumerate().take(4) {
-        out[i] = *line;
-    }
-    out
-}
-
-fn convert_decision_mode(info: &cold_clear::Info) -> u8 {
-    match info {
-        cold_clear::Info::Book => 0,
-        cold_clear::Info::Normal(info) => match info.decision_mode {
-            cold_clear::modes::normal::DecisionMode::Book => 0,
-            cold_clear::modes::normal::DecisionMode::Normal => 1,
-            cold_clear::modes::normal::DecisionMode::SurviveFilter => 2,
-            cold_clear::modes::normal::DecisionMode::SpikeBackup => 3,
-        },
-        cold_clear::Info::PcLoop(_) => 1,
-    }
-}
-
-fn convert_decision_info(
-    info: &cold_clear::Info,
-    chosen_move: &libtetris::Move,
-    decision_info: *mut CCDecisionInfo,
-) {
-    if decision_info.is_null() {
-        return;
-    }
-
-    let (chosen_idx, candidate_count, meta, first_sp, any_sp) = match info {
-        cold_clear::Info::Normal(ninfo) => {
-            let mut found = 0;
-            for (idx, candidate) in ninfo.candidates.iter().enumerate() {
-                if candidate.hold == chosen_move.hold
-                    && candidate.move_piece.same_location(&chosen_move.expected_location)
-                {
-                    found = idx as u32;
-                    break;
-                }
-            }
-            (found, ninfo.candidates.len() as u32,
-             Some(&ninfo.compare_metadata),
-             ninfo.first_survival_pass,
-             ninfo.any_survival_pass)
-        }
-        _ => (0, 0, None, false, false),
-    };
-
-    unsafe {
-        decision_info.write(CCDecisionInfo {
-            decision_mode: convert_decision_mode(info),
-            chosen_idx,
-            candidate_count,
-            primary_compare_idx: meta.and_then(|m| m.primary_compare_idx).map(|i| i as i32).unwrap_or(-1),
-            primary_compare_basis: meta.map(|m| m.primary_compare_basis).unwrap_or(0),
-            best_value_alt_idx: meta.and_then(|m| m.best_value_alt_idx).map(|i| i as i32).unwrap_or(-1),
-            best_survival_alt_idx: meta.and_then(|m| m.best_survival_alt_idx).map(|i| i as i32).unwrap_or(-1),
-            best_spike_alt_idx: meta.and_then(|m| m.best_spike_alt_idx).map(|i| i as i32).unwrap_or(-1),
-            margin_value_vs_primary: meta.and_then(|m| m.margin_value_vs_primary).unwrap_or(0),
-            margin_spike_vs_primary: meta.and_then(|m| m.margin_spike_vs_primary).unwrap_or(0),
-            first_survival_pass: first_sp,
-            any_survival_pass: any_sp,
-            cot_eligible: meta.map(|m| m.cot_eligible).unwrap_or(false),
-        });
-    }
-}
-
-fn convert(m: libtetris::Move, info: cold_clear::Info) -> CCMove {
-    let mut expected_x = [0; 4];
-    let mut expected_y = [0; 4];
-    for (i, &(x, y)) in m.expected_location.cells().iter().enumerate() {
-        expected_x[i] = x as u8;
-        expected_y[i] = y as u8;
-    }
-    let mut movements = [CCMovement::CC_DROP; 32];
-    for (i, &mv) in m.inputs.iter().enumerate() {
-        movements[i] = mv.into();
-    }
-    CCMove {
-        hold: m.hold,
-        expected_x,
-        expected_y,
-        movement_count: m.inputs.len() as u8,
-        movements,
-        nodes: match &info {
-            cold_clear::Info::Normal(info) => info.nodes as u32,
-            cold_clear::Info::PcLoop(_) => 0,
-            cold_clear::Info::Book => 0,
-        },
-        depth: match &info {
-            cold_clear::Info::Normal(info) => info.depth as u32,
-            cold_clear::Info::PcLoop(info) => info.depth as u32,
-            cold_clear::Info::Book => 0,
-        },
-        original_rank: match &info {
-            cold_clear::Info::Normal(info) => info.original_rank as u32,
-            cold_clear::Info::PcLoop(_) => 0,
-            cold_clear::Info::Book => 0,
-        },
-    }
-}
+// ── Move polling (simplified — only CCMove for gameplay) ───────────
 
 #[no_mangle]
 extern "C" fn cc_poll_next_move(
     bot: &mut CCAsyncBot,
     mv: *mut CCMove,
-    plan: *mut MaybeUninit<CCPlanPlacement>,
-    plan_length: *mut u32,
-    candidates: *mut MaybeUninit<CCCandidate>,
-    candidates_length: *mut u32,
-    decision_info: *mut CCDecisionInfo,
 ) -> CCBotPollStatus {
-    match bot.poll_next_move() {
+    match bot.interface.poll_next_move() {
         Ok((m, info)) => {
-            bot.play_next_move(m.expected_location);
-            convert_plan(&info, plan, plan_length);
-            convert_candidates(&info, candidates, candidates_length);
-            convert_decision_info(&info, &m, decision_info);
-            unsafe { mv.write(convert(m, info)) };
+            build_and_store_json(bot, &m, &info);
+            bot.interface.play_next_move(m.expected_location);
+            unsafe { mv.write(convert_move(&m, &info)) };
             CCBotPollStatus::CC_MOVE_PROVIDED
         }
         Err(cold_clear::BotPollState::Waiting) => CCBotPollStatus::CC_WAITING,
@@ -727,24 +420,41 @@ extern "C" fn cc_poll_next_move(
 extern "C" fn cc_block_next_move(
     bot: &mut CCAsyncBot,
     mv: *mut CCMove,
-    plan: *mut MaybeUninit<CCPlanPlacement>,
-    plan_length: *mut u32,
-    candidates: *mut MaybeUninit<CCCandidate>,
-    candidates_length: *mut u32,
-    decision_info: *mut CCDecisionInfo,
 ) -> CCBotPollStatus {
-    match bot.block_next_move() {
+    match bot.interface.block_next_move() {
         Some((m, info)) => {
-            bot.play_next_move(m.expected_location);
-            convert_plan(&info, plan, plan_length);
-            convert_candidates(&info, candidates, candidates_length);
-            convert_decision_info(&info, &m, decision_info);
-            unsafe { mv.write(convert(m, info)) };
+            build_and_store_json(bot, &m, &info);
+            bot.interface.play_next_move(m.expected_location);
+            unsafe { mv.write(convert_move(&m, &info)) };
             CCBotPollStatus::CC_MOVE_PROVIDED
         }
         None => CCBotPollStatus::CC_BOT_DEAD,
     }
 }
+
+// ── JSON decision packet API ───────────────────────────────────────
+
+#[no_mangle]
+extern "C" fn cc_last_decision_json_len(bot: &CCBotWrapper) -> u32 {
+    bot.last_decision_json.as_ref().map_or(0, |s| s.len() as u32)
+}
+
+#[no_mangle]
+unsafe extern "C" fn cc_copy_last_decision_json(
+    bot: &CCBotWrapper,
+    dst: *mut u8,
+    capacity: u32,
+) -> bool {
+    match &bot.last_decision_json {
+        Some(json) if json.len() <= capacity as usize => {
+            std::ptr::copy_nonoverlapping(json.as_ptr(), dst, json.len());
+            true
+        }
+        _ => false,
+    }
+}
+
+// ── Options / Weights defaults ─────────────────────────────────────
 
 #[no_mangle]
 unsafe extern "C" fn cc_default_options(options: *mut CCOptions) {
@@ -814,6 +524,8 @@ unsafe extern "C" fn cc_fast_weights(weights: *mut CCWeights) {
         cold_clear::evaluation::Standard::fast_config(),
     ));
 }
+
+// ── Book loading ───────────────────────────────────────────────────
 
 #[no_mangle]
 unsafe extern "C" fn cc_load_book_from_file(path: *const c_char) -> *const CCBook {

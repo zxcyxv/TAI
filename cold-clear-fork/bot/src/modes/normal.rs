@@ -123,6 +123,15 @@ impl<E: Evaluator> BotState<E> {
         if candidates.is_empty() {
             return None;
         }
+
+        // Capture observation from the pre-move board
+        let pre_board = self.tree.board();
+        let obs_field = pre_board.get_field();
+        let obs_hold = pre_board.hold_piece;
+        let obs_combo = pre_board.combo;
+        let obs_b2b = pre_board.b2b_bonus;
+        let obs_queue: Vec<Piece> = pre_board.next_queue().collect();
+
         let mut book_move = None;
         if let Some(book) = book {
             if self.tree.board().column_heights().iter().all(|&h| h <= 10) {
@@ -163,14 +172,31 @@ impl<E: Evaluator> BotState<E> {
             any_survival_pass |= survival_pass;
 
             let board_after = mv.board.get_field();
-            let pv = self.tree.get_candidate_pv(mv.original_rank as usize, 5);
+            let pv = self.tree.get_candidate_pv(mv.original_rank as usize, 20);
+
+            let cand_trace = eval.into_standard_trace(&mv.trace);
+
+            // Compute future terminal trace by replaying PV on the candidate's board
+            let future_terminal_trace = if !pv.is_empty() {
+                let mut replay_board = mv.board.clone();
+                let mut last_lock = LockResult::default();
+                let mut last_piece = mv.mv.kind.0;
+                for (fp, _lr) in &pv {
+                    last_lock = replay_board.lock_piece(*fp);
+                    last_piece = fp.kind.0;
+                }
+                let (_, _, trace) = eval.evaluate(&last_lock, &replay_board, 0, last_piece);
+                eval.into_standard_trace(&trace)
+            } else {
+                cand_trace.clone()
+            };
 
             candidate_infos.push(CandidateInfo {
                 move_piece: mv.mv,
                 hold: mv.hold,
                 eval_score: eval.get_value(&mv.evaluation),
                 spike_score: eval.get_spike(&mv.evaluation),
-                trace: eval.into_standard_trace(&mv.trace),
+                trace: cand_trace,
                 original_rank: mv.original_rank,
                 placement_kind: mv.lock.placement_kind,
                 b2b: mv.lock.b2b,
@@ -181,6 +207,7 @@ impl<E: Evaluator> BotState<E> {
                 survival_pass,
                 board_after,
                 pv,
+                future_terminal_trace,
             });
         }
 
@@ -201,29 +228,32 @@ impl<E: Evaluator> BotState<E> {
             &child,
         );
 
-        let info = if book_move.is_some() {
-            crate::Info::Book
-        } else {
-            crate::Info::Normal(Info {
-                nodes: if book_move.is_some() {
-                    0
-                } else {
-                    self.tree.nodes()
-                },
-                depth: if book_move.is_some() {
-                    6
-                } else {
-                    self.tree.depth() as u32
-                },
-                original_rank: child.original_rank,
-                decision_mode,
-                plan,
-                candidates: candidate_infos,
-                first_survival_pass,
-                any_survival_pass,
-                compare_metadata,
-            })
-        };
+        let info = crate::Info::Normal(Info {
+            nodes: if book_move.is_some() {
+                0
+            } else {
+                self.tree.nodes()
+            },
+            depth: if book_move.is_some() {
+                0
+            } else {
+                self.tree.depth() as u32
+            },
+            original_rank: child.original_rank,
+            decision_mode,
+            plan,
+            candidates: candidate_infos,
+            first_survival_pass,
+            any_survival_pass,
+            compare_metadata,
+            obs_field,
+            obs_hold,
+            obs_can_hold: self.options.use_hold,
+            obs_combo,
+            obs_b2b,
+            obs_queue,
+            incoming,
+        });
 
         let inputs = find_moves(
             self.tree.board(),
@@ -509,6 +539,8 @@ pub struct CandidateInfo {
     pub board_after: [[bool; 10]; 40],
     #[serde(skip)]
     pub pv: Vec<(FallingPiece, LockResult)>,
+    #[serde(skip)]
+    pub future_terminal_trace: Option<crate::evaluation::standard::EvalTrace>,
 }
 
 fn default_board_field() -> [[bool; 10]; 40] {
@@ -539,4 +571,19 @@ pub struct Info {
     pub first_survival_pass: bool,
     pub any_survival_pass: bool,
     pub compare_metadata: CompareMetadata,
+    // Observation captured at decision time
+    #[serde(skip, default = "default_board_field")]
+    pub obs_field: [[bool; 10]; 40],
+    #[serde(skip)]
+    pub obs_hold: Option<Piece>,
+    #[serde(skip)]
+    pub obs_can_hold: bool,
+    #[serde(skip)]
+    pub obs_combo: u32,
+    #[serde(skip)]
+    pub obs_b2b: bool,
+    #[serde(skip)]
+    pub obs_queue: Vec<Piece>,
+    #[serde(skip)]
+    pub incoming: u32,
 }

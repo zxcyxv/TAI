@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Legacy v2/v2.5 CoT renderer.
+
+This script targets the older Unity-assembled raw packet shape and is not the
+canonical renderer for `cot_raw_v3`.
+"""
 import argparse
 import json
 from dataclasses import dataclass

@@ -1,4 +1,11 @@
-# Raw Decision Packet Schema
+# Deprecated: Raw Decision Packet Schema (v2)
+
+This document describes the older Unity-assembled raw packet format and is no longer the canonical schema.
+
+- Current canonical schema: [raw_v3_schema.md](/C:/Users/jrjin/Desktop/TAI/Tetris_AI/datasets/raw_v3_schema.md)
+- Collector wrapper details: [collector_protocol.md](/C:/Users/jrjin/Desktop/TAI/Tetris_AI/datasets/collector_protocol.md)
+
+The remainder of this file is preserved only for reference while migrating old data and tools.
 
 Step-per-line JSONL. Each line is one `DecisionPacket` — a single AI decision step.
 

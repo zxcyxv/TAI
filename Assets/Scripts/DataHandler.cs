@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -10,22 +9,28 @@ public class DataHandler : MonoBehaviour
     [Header("Collection Settings")]
     [SerializeField] private int targetGames = 5000;
     [SerializeField] private int stepsPerGame = 100;
-    [SerializeField] private int gamesPerFile = 100;
+    [SerializeField] private int maxLinesPerFile = 10000;
+    [SerializeField] private int collectorSeed = 1337;
+    [SerializeField] private string engineCommit = "";
 
     [Header("Runtime Info (Read Only)")]
     [SerializeField] private int completedGames;
     [SerializeField] private int currentStepCount;
     [SerializeField] private bool collectionDone;
 
-    private readonly List<DecisionPacket> currentGameSteps = new List<DecisionPacket>(100);
-    private DecisionPacket pendingStep;
-    private bool updated = true;
+    private DecisionPacket pendingSpawnStep;
+    private DecisionPacket stagedStep;
     private StreamWriter writer;
     private string datasetsDir;
     private int currentFileIndex;
-    private int currentEpisodeId;
+    private int currentEpisodeId = 1;
+    private int nextStepId;
+    private int writtenLinesInFile;
+    private string runId;
     private Board board;
     private bool pendingRestartAfterLock;
+    private bool updated = true;
+    private CollectorMeta collectorMeta;
 
     void Awake()
     {
@@ -43,6 +48,16 @@ public class DataHandler : MonoBehaviour
         datasetsDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "datasets"));
         Directory.CreateDirectory(datasetsDir);
         currentFileIndex = 1;
+        runId = System.DateTime.UtcNow.ToString("yyyyMMdd_HHmmss") + "_" + System.Guid.NewGuid().ToString("N").Substring(0, 8);
+        collectorMeta = new CollectorMeta
+        {
+            runId = runId,
+            collectorSeed = collectorSeed,
+            engineCommit = string.IsNullOrWhiteSpace(engineCommit) ? "unknown" : engineCommit,
+            weightsHash = "",
+            optionsHash = "",
+            bookEnabled = false,
+        };
         OpenNextFile();
         board = FindFirstObjectByType<Board>();
     }
@@ -57,16 +72,31 @@ public class DataHandler : MonoBehaviour
         FlushAndClose();
     }
 
+    public void ConfigureCollectorMeta(string weightsHash, string optionsHash, bool bookEnabled)
+    {
+        collectorMeta.weightsHash = weightsHash ?? string.Empty;
+        collectorMeta.optionsHash = optionsHash ?? string.Empty;
+        collectorMeta.bookEnabled = bookEnabled;
+    }
+
     private void OpenNextFile()
     {
         FlushAndClose();
         string path = Path.Combine(datasetsDir, $"dataset_{currentFileIndex:D4}.jsonl");
         writer = new StreamWriter(path, append: false, encoding: Encoding.UTF8);
+        writtenLinesInFile = 0;
         Debug.Log($"[DataHandler] Writing to: {path}");
     }
 
     private void FlushAndClose()
     {
+        if (writer != null && stagedStep != null)
+        {
+            stagedStep.gameComplete = false;
+            writer.WriteLine(stagedStep.ToJsonLine(collectorMeta));
+            writer.Flush();
+            stagedStep = null;
+        }
         if (writer != null)
         {
             writer.Flush();
@@ -82,80 +112,38 @@ public class DataHandler : MonoBehaviour
 
     public void SaveData()
     {
-        if (collectionDone || updated || DataManager.Instance == null)
+        if (collectionDone || updated)
         {
             return;
         }
 
         updated = true;
-        pendingStep = new DecisionPacket
-        {
-            boardVisible = DataManager.Instance.GetBoardVisible(),
-            boardHidden = DataManager.Instance.GetBoardHidden(),
-            currentPiece = DecisionPacket.PieceToString(DataManager.Instance.GetCurrentDataMino()),
-            holdPiece = DecisionPacket.PieceToString(DataManager.Instance.GetHoldDataMino()),
-            nextVisible = DecisionPacket.ConvertPieces(DataManager.Instance.GetPreviewDataMino()),
-            canHold = DataManager.Instance.GetCanHold(),
-            combo = DataManager.Instance.GetCombo(),
-            b2bChain = DataManager.Instance.GetB2BChain(),
-            candidates = new List<CandidateData>()
-        };
+        pendingSpawnStep = new DecisionPacket();
     }
 
-    public void AttachDecision(
-        List<CandidateData> candidates,
-        ColdClearNative.CCDecisionInfo decisionInfo,
-        ColdClearNative.CCMove move,
-        List<PlanStepData> chosenPlan = null)
+    public void AttachEngineJson(string engineJson)
     {
-        if (pendingStep == null)
+        if (pendingSpawnStep == null || collectionDone)
         {
             return;
         }
 
-        // Search metadata
-        pendingStep.nodes = move.nodes;
-        pendingStep.depth = move.depth;
-        pendingStep.decisionMode = DecisionPacket.DecisionModeToString(decisionInfo.decision_mode);
-        pendingStep.chosenIdx = (int)decisionInfo.chosen_idx;
+        if (stagedStep != null)
+        {
+            DecisionPacket previousStep = stagedStep;
+            stagedStep = null;
+            WriteStep(previousStep, false);
+        }
 
-        // Comparison metadata
-        pendingStep.primaryCompareIdx = decisionInfo.primary_compare_idx >= 0 ? (int?)decisionInfo.primary_compare_idx : null;
-        pendingStep.primaryCompareBasis = DecisionPacket.CompareBasisToString(decisionInfo.primary_compare_basis);
-        pendingStep.bestValueAltIdx = decisionInfo.best_value_alt_idx >= 0 ? (int?)decisionInfo.best_value_alt_idx : null;
-        pendingStep.bestSurvivalAltIdx = decisionInfo.best_survival_alt_idx >= 0 ? (int?)decisionInfo.best_survival_alt_idx : null;
-        pendingStep.bestSpikeAltIdx = decisionInfo.best_spike_alt_idx >= 0 ? (int?)decisionInfo.best_spike_alt_idx : null;
-        pendingStep.marginValueVsPrimary = decisionInfo.primary_compare_idx >= 0 ? (int?)decisionInfo.margin_value_vs_primary : null;
-        pendingStep.marginSpikeVsPrimary = decisionInfo.primary_compare_idx >= 0 ? (int?)decisionInfo.margin_spike_vs_primary : null;
-        pendingStep.firstSurvivalPass = decisionInfo.first_survival_pass;
-        pendingStep.anySurvivalPass = decisionInfo.any_survival_pass;
-        pendingStep.cotEligible = decisionInfo.cot_eligible;
+        pendingSpawnStep.episodeId = currentEpisodeId;
+        pendingSpawnStep.stepId = nextStepId;
+        pendingSpawnStep.engineJson = engineJson;
+        stagedStep = pendingSpawnStep;
+        pendingSpawnStep = null;
+        nextStepId++;
+        currentStepCount = nextStepId;
 
-        // Incoming garbage
-        pendingStep.incoming = ColdClearAgent.Instance != null ? ColdClearAgent.Instance.IncomingGarbage : 0;
-
-        // Candidates
-        pendingStep.candidates = candidates ?? new List<CandidateData>();
-
-        // Chosen action
-        pendingStep.actionHold = move.hold;
-        pendingStep.cellsX = DecisionPacket.CopyBytes(move.expected_x);
-        pendingStep.cellsY = DecisionPacket.CopyBytes(move.expected_y);
-        pendingStep.placementToken = PlacementToken.FromNative(
-            move.hold,
-            pendingStep.currentPiece,
-            move.expected_x,
-            move.expected_y);
-        pendingStep.actionToken = pendingStep.placementToken;
-
-        // Chosen plan
-        pendingStep.chosenPlan = chosenPlan ?? new List<PlanStepData>();
-
-        currentGameSteps.Add(pendingStep);
-        currentStepCount = currentGameSteps.Count;
-        pendingStep = null;
-
-        if (currentGameSteps.Count >= stepsPerGame)
+        if (currentStepCount >= stepsPerGame)
         {
             pendingRestartAfterLock = true;
         }
@@ -168,7 +156,7 @@ public class DataHandler : MonoBehaviour
             return;
         }
 
-        FinishCurrentGame(false);
+        FinalizeEpisode();
     }
 
     public bool ConsumePendingRestartAfterLock()
@@ -179,25 +167,30 @@ public class DataHandler : MonoBehaviour
         }
 
         pendingRestartAfterLock = false;
-        FinishCurrentGame(true);
+        FinalizeEpisode();
+        if (!collectionDone)
+        {
+            board?.RestartGame();
+        }
         return true;
     }
 
-    private void FinishCurrentGame(bool gameComplete)
+    private void FinalizeEpisode()
     {
-        if (currentGameSteps.Count == 0)
+        if (stagedStep == null)
         {
-            pendingStep = null;
+            pendingSpawnStep = null;
             return;
         }
 
-        currentEpisodeId++;
-        WriteGameToFile(currentEpisodeId, currentGameSteps, gameComplete);
-
+        DecisionPacket terminalStep = stagedStep;
+        stagedStep = null;
+        WriteStep(terminalStep, true);
+        pendingSpawnStep = null;
         completedGames++;
-        currentGameSteps.Clear();
         currentStepCount = 0;
-        pendingStep = null;
+        nextStepId = 0;
+        currentEpisodeId++;
         pendingRestartAfterLock = false;
 
         Debug.Log($"[DataHandler] Game {completedGames}/{targetGames} collected.");
@@ -208,34 +201,25 @@ public class DataHandler : MonoBehaviour
             collectionDone = true;
             Debug.Log($"[DataHandler] Collection complete! Dir: {datasetsDir}");
             ColdClearAgent.Instance?.SetActive(false);
-            return;
-        }
-
-        if (completedGames % gamesPerFile == 0)
-        {
-            currentFileIndex++;
-            OpenNextFile();
-        }
-
-        if (gameComplete)
-        {
-            board?.RestartGame();
         }
     }
 
-    private void WriteGameToFile(int gameIndex, List<DecisionPacket> steps, bool gameComplete)
+    private void WriteStep(DecisionPacket packet, bool gameComplete)
     {
-        if (writer == null)
+        if (writer == null || packet == null)
         {
             return;
         }
 
-        for (int i = 0; i < steps.Count; i++)
+        packet.gameComplete = gameComplete;
+        writer.WriteLine(packet.ToJsonLine(collectorMeta));
+        writer.Flush();
+        writtenLinesInFile++;
+
+        if (writtenLinesInFile >= maxLinesPerFile)
         {
-            steps[i].episodeId = gameIndex;
-            steps[i].stepId = i;
-            steps[i].gameComplete = gameComplete;
-            writer.WriteLine(steps[i].ToJson());
+            currentFileIndex++;
+            OpenNextFile();
         }
     }
 
@@ -252,10 +236,11 @@ public class DataHandler : MonoBehaviour
 
     public void ClearData()
     {
-        currentGameSteps.Clear();
-        currentStepCount = 0;
-        pendingStep = null;
+        pendingSpawnStep = null;
+        stagedStep = null;
         pendingRestartAfterLock = false;
         updated = true;
+        nextStepId = 0;
+        currentStepCount = 0;
     }
 }

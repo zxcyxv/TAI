@@ -1,6 +1,13 @@
-# Current Data Distribution
+# Legacy Data Distribution
 
-This document summarizes the current raw decision packet dataset and the first-pass offline CoT rendering behavior as of March 10, 2026.
+This document summarizes the older Unity-assembled raw packet pipeline and its first-pass offline CoT renderer.
+
+- It does not describe the canonical `cot_raw_v3` packet format.
+- It should not be used as the schema reference for new collection runs.
+- Current schema reference: [raw_v3_schema.md](/C:/Users/jrjin/Desktop/TAI/Tetris_AI/datasets/raw_v3_schema.md)
+- Current collection protocol: [collector_protocol.md](/C:/Users/jrjin/Desktop/TAI/Tetris_AI/datasets/collector_protocol.md)
+
+This document summarizes the legacy raw decision packet dataset and the first-pass offline CoT rendering behavior as of March 10, 2026.
 
 ## Dataset Scope
 
